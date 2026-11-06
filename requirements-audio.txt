@@ -1,0 +1,10 @@
+# 语音模式（麦克风录音 + 离线唤醒）才需要；装不上不影响文字模式
+sounddevice>=0.4.6
+numpy>=1.24
+openwakeword>=0.6
+onnxruntime>=1.16
+
+# 可选：想用中文自定义唤醒词时换 sherpa-onnx
+# sherpa-onnx>=1.10
+# 可选：更严格的人声判定
+# webrtcvad>=2.0.10

@@ -1,0 +1,45 @@
+# ===== 密钥与本地配置（绝对不能提交）=====
+.config.yaml
+.env
+*.key
+*secret*
+config.env
+
+# ===== 音频与教材（版权 + 体积）=====
+*.mp3
+*.wav
+*.m4a
+*.opus
+library/
+lessons/
+demo_split/
+bridge/audio/
+
+# ===== 运行时数据 =====
+*.db
+*.db-wal
+*.db-shm
+progress.json
+.cache/
+tmp/
+logs/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ===== 构建产物 =====
+release/
+dist/
+build/
+
+# ===== 系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 演示残留
+demo_agent/

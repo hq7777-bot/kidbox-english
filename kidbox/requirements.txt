@@ -1,0 +1,10 @@
+# 运行主程序需要
+requests>=2.31
+sounddevice>=0.4.6        # 麦克风录音 / 响度检测
+numpy>=1.24               # 唤醒词推理
+openwakeword>=0.6         # 离线唤醒（英文预训练）
+onnxruntime>=1.16         # openwakeword 推理后端
+
+# 可选
+# sherpa-onnx>=1.10       # 想用中文自定义唤醒词时换成它
+# webrtcvad>=2.0.10       # 想更严格的人声判定时用

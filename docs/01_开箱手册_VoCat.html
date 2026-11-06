@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>01_开箱手册_VoCat</title><style>
+:root{--fg:#1a1a1a;--muted:#5f6b7a;--line:#e3e8ef;--accent:#c0392b;--accent2:#0f766e;
+--bg:#fbfcfd;--card:#fff;--warn:#fff8e6;--warnline:#f0c36d;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+.wrap{max-width:1000px;margin:0 auto;padding:48px 28px 96px;background:var(--card);
+box-shadow:0 0 0 1px var(--line);}
+h1{font-size:30px;line-height:1.35;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:22px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--line);}
+h3{font-size:17px;margin:26px 0 10px;color:var(--accent2)}
+p,li{color:#243040}
+blockquote{margin:16px 0;padding:12px 16px;background:var(--warn);border-left:4px solid var(--warnline);
+border-radius:0 6px 6px 0;color:#5a4a1f}
+blockquote p{margin:0;color:#5a4a1f}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;display:table}
+th,td{border:1px solid var(--line);padding:9px 11px;vertical-align:top;text-align:left}
+th{background:#f4f7fa;font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:#fafbfc}
+code{background:#f2f5f9;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+font:13.5px/1.5 "Cascadia Code",Consolas,monospace;color:#b03a2e}
+pre{background:#1f2430;color:#dfe6f3;padding:16px 18px;border-radius:8px;overflow:auto;
+font:13.5px/1.6 "Cascadia Code",Consolas,monospace;margin:16px 0}
+pre code{background:none;border:0;color:inherit;padding:0;font-size:13.5px}
+a{color:#0b6bcb;text-decoration:none;border-bottom:1px solid #bcd7f4}
+hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+ul,ol{padding-left:22px}
+li{margin:4px 0}
+.meta{color:var(--muted);font-size:14px;margin-bottom:26px}
+h2:first-of-type{margin-top:32px}
+@media print{body{background:#fff}.wrap{box-shadow:none;max-width:none;padding:0}
+h2{page-break-after:avoid}table{page-break-inside:avoid}}
+</style></head>
+<body><div class="wrap">
+<h1 id="vocat">VoCat 开箱手册：从拆箱到孩子能对话</h1>
+<blockquote>
+<p>预计 60~90 分钟｜全程不需要写代码｜每一步都有"验收"，过了再往下走
+固件版本以本文写作时为准：<strong>v2.5.2</strong>（2026-10-11）</p>
+</blockquote>
+<hr />
+<h2 id="0">0. 准备清单</h2>
+<ul>
+<li>[ ] VoCat 主板（V1.0）+ 底座（如果有）</li>
+<li>[ ] <strong>USB-C 数据线</strong>（必须能传数据，不能是纯充电线）</li>
+<li>[ ] 5V/2A 电源（手机充电头就行，别用 PD 快充诱骗器）</li>
+<li>[ ] 一台 Windows 电脑</li>
+<li>[ ] 手机（配网用）</li>
+<li>[ ] 家里 WiFi 密码（<strong>必须知道是 2.4G 还是 5G</strong>）</li>
+<li>[ ] 路由器在附近，信号满格</li>
+</ul>
+<hr />
+<h2 id="1-5">1. 通电自检（5 分钟）</h2>
+<ul>
+<li>[ ] 插上 Type-C 线，看屏幕</li>
+</ul>
+<p><strong>验收：屏幕亮，能看到画面（logo 或表情）。</strong></p>
+<p>黑屏就先别急着刷机，按这个顺序排：</p>
+<ol>
+<li>换一根线（十有八九是充电线，没有数据线芯）</li>
+<li>换 USB 口，或直接用 5V 电源</li>
+<li>按住 <strong>BOOT</strong> 键再插线（强制进下载模式，屏幕会保持黑）</li>
+</ol>
+<hr />
+<h2 id="2-1">2. 确认版本（1 分钟）</h2>
+<ul>
+<li>[ ] 看包装或板子背面丝印，确认是 <strong>V1.0</strong></li>
+</ul>
+<p><strong>不用管版本差异</strong>：当前固件的板级代码里有 <code>DetectPcbVersion()</code>，开机会自动探测 V1.0 / V1.2 并套用对应引脚，串口日志会打印 <code>PCB version V1.0</code>。</p>
+<hr />
+<h2 id="3-5">3. 下载固件（5 分钟）</h2>
+<ul>
+<li>[ ] 打开 <a href="https://github.com/78/xiaozhi-esp32/releases">https://github.com/78/xiaozhi-esp32/releases</a></li>
+<li>[ ] 找最新的 release（现在 <strong>v2.5.2</strong>）</li>
+<li>[ ] 下载 <code>v2.5.2_espressif-esp-vocat.zip</code>（约 2.9 MB）</li>
+<li>[ ] 解压，里面只有一个文件：<code>merged-binary.bin</code>（约 11.3 MB）</li>
+</ul>
+<blockquote>
+<p>别下成 <code>espressif-esp-box-3</code>——那是 BOX-3 的固件，名字很像。
+认准 <strong>vocat</strong> 这五个字母。</p>
+</blockquote>
+<hr />
+<h2 id="4-10">4. 烧录（10 分钟）</h2>
+<h3 id="windows">先找串口号（Windows）</h3>
+<ul>
+<li>[ ] 插上板子 → 右键"开始"→ 设备管理器 → <strong>端口 (COM 和 LPT)</strong></li>
+<li>[ ] 记下 <code>COM几</code>（例如 COM5）</li>
+</ul>
+<p>看不到端口 = 线是充电线，或者没装驱动（ESP32-S3 一般免驱，Win10 以上自带）。</p>
+<h3 id="_1">烧（推荐本地命令行，国内最稳）</h3>
+<pre><code class="language-bash">pip install esptool
+
+# 把 COM5 换成你实际的端口号
+esptool.py --chip esp32s3 -p COM5 -b 460800 write_flash 0x0 merged-binary.bin
+</code></pre>
+<p>看到 <code>Hash of data verified.</code> 就是成功，板子会自动重启。</p>
+<h3 id="failed-to-connect">如果提示 "Failed to connect"</h3>
+<ul>
+<li>[ ] 按住 <strong>BOOT</strong> 不放，再插 USB，然后松开 BOOT，重跑命令</li>
+</ul>
+<h3 id="_2">备选：网页烧录</h3>
+<p>Chrome / Edge 打开 espressif 的在线烧录页（ESP Launchpad），选 ESP32-S3、端口、地址 <code>0x0</code>、文件选 <code>merged-binary.bin</code>。</p>
+<p><strong>验收：烧完板子重启，屏幕亮起，可能播报一串提示（如"请配网"）。</strong></p>
+<hr />
+<h2 id="5-5">5. 配网（5 分钟）</h2>
+<ul>
+<li>[ ] 手机 WiFi 列表里找 <strong><code>Xiaozhi-XXXX</code></strong>（无密码，开放热点）</li>
+<li>[ ] 连上它，等自动跳转配置页；不跳就用浏览器输 <strong><code>192.168.4.1</code></strong></li>
+<li>[ ] 选你家 WiFi，输密码，点连接</li>
+<li>[ ] 板子重启并连上网</li>
+</ul>
+<p><strong>验收：屏幕/语音提示"已连接"，或设备开始播报 6 位激活码。</strong></p>
+<h3 id="_3">配网失败的三个常见原因</h3>
+<table>
+<thead>
+<tr>
+<th>现象</th>
+<th>原因</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>列表里搜不到 WiFi</td>
+<td>只支持 <strong>2.4G</strong></td>
+<td>把路由器 2.4G 单独开一个 SSID</td>
+</tr>
+<tr>
+<td>输入密码后连不上</td>
+<td>连的是 5G</td>
+<td>同上</td>
+</tr>
+<tr>
+<td>用手机热点连不上</td>
+<td>iPhone 默认 5G</td>
+<td>开"最大兼容性"</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>需要网页二次认证的 WiFi（酒店、公司）连不上，别在这上面耗时间，用手机热点或家里的。</p>
+</blockquote>
+<hr />
+<h2 id="6-5">6. 激活（5 分钟）</h2>
+<ul>
+<li>[ ] 记下设备播报的 <strong>6 位数字</strong>（屏幕上也应该有）</li>
+<li>[ ] 手机或电脑打开 <a href="https://xiaozhi.me">https://xiaozhi.me</a></li>
+<li>[ ] 用手机号注册 / 登录</li>
+<li>[ ] 输入 6 位码 → 添加设备</li>
+<li>[ ] 设备重启后即可使用</li>
+</ul>
+<p><strong>验收：设备能应答"你好，小智"。</strong></p>
+<blockquote>
+<p>6 位码有时效，过期就唤醒设备让它重播一次。注册只支持部分地区手机号（中国大陆可以）。</p>
+</blockquote>
+<hr />
+<h2 id="7-10">7. 第一次对话 + 功能验收（10 分钟）</h2>
+<p>唤醒词默认 <strong>"你好，小智"</strong>；不应答就试 <strong>"Hi ESP"</strong>。</p>
+<p>对着它说这 7 句，把结果记在右边：</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>你说</th>
+<th>预期</th>
+<th>实际（打勾/记问题）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>你好</td>
+<td>有回应、表情变化</td>
+<td>☐</td>
+</tr>
+<tr>
+<td>2</td>
+<td>你叫什么名字</td>
+<td>自然对话</td>
+<td>☐</td>
+</tr>
+<tr>
+<td>3</td>
+<td>讲个睡前故事</td>
+<td>生成内容</td>
+<td>☐</td>
+</tr>
+<tr>
+<td>4</td>
+<td>恐龙为什么灭绝</td>
+<td>知识问答（<strong>记下答得对不对</strong>）</td>
+<td>☐</td>
+</tr>
+<tr>
+<td>5</td>
+<td>（它说话时直接插话）</td>
+<td>能被打断</td>
+<td>☐</td>
+</tr>
+<tr>
+<td>6</td>
+<td>声音小一点</td>
+<td>语控设备</td>
+<td>☐</td>
+</tr>
+<tr>
+<td>7</td>
+<td>你看到我了吗 / 转过来</td>
+<td>声源定位（双麦阵列）</td>
+<td>☐</td>
+</tr>
+</tbody>
+</table>
+<p><strong>这张表就是你后面要补的功能清单。</strong></p>
+<hr />
+<h2 id="8-5">8. 试一试"它做不到的"（5 分钟）</h2>
+<p>刻意说这三句，<strong>不是故障，是为了让你亲眼看到边界</strong>：</p>
+<ul>
+<li>[ ] "播放第三课" → 大概率不会（它没有你的音频库）</li>
+<li>[ ] "复习上两个音频" → 不会</li>
+<li>[ ] "接着上次听" → 不会</li>
+</ul>
+<p>看到它答不上来，你才会明白为什么需要自建服务端。</p>
+<hr />
+<h2 id="9">9. 下一步怎么走</h2>
+<table>
+<thead>
+<tr>
+<th>情况</th>
+<th>下一步</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>孩子愿意跟它说话，问"它还能干什么"</td>
+<td>搭服务端，接 DeepSeek + 教材音频（主文档 §19）</td>
+</tr>
+<tr>
+<td>孩子玩两下就丢一边</td>
+<td>先停。别急着投入，观察一周再说</td>
+</tr>
+<tr>
+<td>唤醒/打断体验很差</td>
+<td>先调位置和音量，别急着换硬件——很多是距离和环境噪声问题</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_4">常见问题速查</h2>
+<table>
+<thead>
+<tr>
+<th>现象</th>
+<th>最可能的原因</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>黑屏</td>
+<td>充电线 / 供电不足 / 刷错固件</td>
+<td>换数据线、5V2A、确认是 <code>esp-vocat</code></td>
+</tr>
+<tr>
+<td>烧录连不上</td>
+<td>没进下载模式</td>
+<td>按住 BOOT 插线</td>
+</tr>
+<tr>
+<td>屏幕亮但没声音</td>
+<td>音量 0 / 喇叭线松</td>
+<td>语音调大、按压喇叭座</td>
+</tr>
+<tr>
+<td>表情不动只有文字</td>
+<td>资源包没烧进去</td>
+<td>先确认用的是 release 里的合并固件；仍不行按主文档 §18.4 单独烧资源包</td>
+</tr>
+<tr>
+<td>唤醒不灵</td>
+<td>环境吵 / 距离远 / 电视在响</td>
+<td>1 米内、安静房间再试</td>
+</tr>
+<tr>
+<td>说两句就断</td>
+<td>WiFi 信号弱 / 路由器省电</td>
+<td>靠近路由器；关掉路由器的"节能/绿色模式"</td>
+</tr>
+<tr>
+<td>一直重启</td>
+<td>供电不足</td>
+<td>换 5V/2A，别用电脑 USB 口直供</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_5">给孩子用之前的三件事</h2>
+<ul>
+<li>[ ] <strong>音量先调到 50% 以下</strong>再给他（对讲机/音箱类设备很容易过响）</li>
+<li>[ ] 放在<strong>桌面</strong>，别放床边通宵充（USB 供电会发热）</li>
+<li>[ ] 先不要做外壳、不要加电池——<strong>等确认孩子天天用，再投入</strong></li>
+</ul>
+<hr />
+<p><em>本手册对应主文档《儿童英语AI硬件_方案与DIY教程》§17、§18。</em></p>
+</div></body></html>

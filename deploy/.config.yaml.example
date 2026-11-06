@@ -1,0 +1,33 @@
+# 把这个文件复制成 data/.config.yaml，然后改 4 处（都标了 ←改）
+# 完整原始配置见 https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/main/main/xiaozhi-server/config.yaml
+# 本文件只写"覆盖项"，没写的用默认值
+
+selected_module:
+  VAD: SileroVAD
+  ASR: FunASR              # 本地 SenseVoiceSmall，免费离线
+  LLM: DeepSeekLLM         # ←改：默认是 ChatGLMLLM
+  VLLM: ChatGLMVLLM
+  TTS: EdgeTTS             # 免费，无需 key
+  Memory: mem_local_short  # ←改：默认 nomem（不记忆）
+  Intent: function_call    # 支持工具调用/音量控制
+
+LLM:
+  DeepSeekLLM:
+    type: openai
+    model_name: deepseek-flash      # 旧名 deepseek-v4-flash 也能跑
+    url: https://api.deepseek.com
+    api_key: sk-REPLACE_ME          # ←改：platform.deepseek.com 申请
+
+TTS:
+  EdgeTTS:
+    voice: zh-CN-XiaoyiNeural       # ←改（可选）：中文童声，默认可能是 Xiaoxiao
+
+plugins:
+  play_music:
+    # 容器内绝对路径！宿主机 ./data 映射到 /opt/xiaozhi-esp32-server/data
+    music_dir: /opt/xiaozhi-esp32-server/data/lessons
+    refresh_time: 30
+
+# 儿童场景建议（按需打开）
+close_connection_no_voice_time: 120
+delete_audio: true

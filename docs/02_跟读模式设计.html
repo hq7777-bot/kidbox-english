@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>02_跟读模式设计</title><style>
+:root{--fg:#1a1a1a;--muted:#5f6b7a;--line:#e3e8ef;--accent:#c0392b;--accent2:#0f766e;
+--bg:#fbfcfd;--card:#fff;--warn:#fff8e6;--warnline:#f0c36d;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+.wrap{max-width:1000px;margin:0 auto;padding:48px 28px 96px;background:var(--card);
+box-shadow:0 0 0 1px var(--line);}
+h1{font-size:30px;line-height:1.35;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:22px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--line);}
+h3{font-size:17px;margin:26px 0 10px;color:var(--accent2)}
+p,li{color:#243040}
+blockquote{margin:16px 0;padding:12px 16px;background:var(--warn);border-left:4px solid var(--warnline);
+border-radius:0 6px 6px 0;color:#5a4a1f}
+blockquote p{margin:0;color:#5a4a1f}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;display:table}
+th,td{border:1px solid var(--line);padding:9px 11px;vertical-align:top;text-align:left}
+th{background:#f4f7fa;font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:#fafbfc}
+code{background:#f2f5f9;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+font:13.5px/1.5 "Cascadia Code",Consolas,monospace;color:#b03a2e}
+pre{background:#1f2430;color:#dfe6f3;padding:16px 18px;border-radius:8px;overflow:auto;
+font:13.5px/1.6 "Cascadia Code",Consolas,monospace;margin:16px 0}
+pre code{background:none;border:0;color:inherit;padding:0;font-size:13.5px}
+a{color:#0b6bcb;text-decoration:none;border-bottom:1px solid #bcd7f4}
+hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+ul,ol{padding-left:22px}
+li{margin:4px 0}
+.meta{color:var(--muted);font-size:14px;margin-bottom:26px}
+h2:first-of-type{margin-top:32px}
+@media print{body{background:#fff}.wrap{box-shadow:none;max-width:none;padding:0}
+h2{page-break-after:avoid}table{page-break-inside:avoid}}
+</style></head>
+<body><div class="wrap">
+<h1 id="esp-vocat">跟读模式设计（ESP-VoCat + 小智自建服务端）</h1>
+<blockquote>
+<p>目标：一句英文音频 → 播完 → 等孩子跟读 → 判定 → 下一句
+结论：<strong>能做，不需要本地客户端，不需要改固件。</strong> 缺的只是一个"状态机插件"。</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 为什么不用做本地客户端</h2>
+<p>小智服务端已经具备这件事需要的三样东西，你只缺"逻辑"：</p>
+<table>
+<thead>
+<tr>
+<th>需要的能力</th>
+<th>小智里现成的</th>
+<th>出处</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>逐句推音频</td>
+<td><code>ContentType.FILE</code> 一次推一个文件</td>
+<td><code>plugins_func/functions/play_music.py</code></td>
+</tr>
+<tr>
+<td>判断"孩子说完了"</td>
+<td>SileroVAD，<code>max_sentence_silence: 200ms</code></td>
+<td><code>config.yaml</code> 的 VAD / ASR 段</td>
+</tr>
+<tr>
+<td>拿到"孩子说了什么"</td>
+<td>ASR（本地 SenseVoice / 云端）</td>
+<td><code>config.yaml</code> 的 selected_module.ASR</td>
+</tr>
+<tr>
+<td>触发下一轮</td>
+<td>播完 TTS，设备自动回到聆听（连续对话）</td>
+<td>固件默认行为，需实测确认</td>
+</tr>
+</tbody>
+</table>
+<p><strong>做本地客户端只有三种情况才值得</strong>：
+1. 要毫秒级同步的"卡拉OK高亮"；
+2. 要完全离线（本地 ASR + 本地 TTS + 本地 LLM）；
+3. 用官方服务器（官方不开放工具/状态机入口）。</p>
+<p>你三个都不需要，所以方向是：<strong>自建服务端 + 跟读插件</strong>。</p>
+<hr />
+<h2 id="2">2. 状态机</h2>
+<pre><code>        孩子说&quot;跟读第三课&quot;
+                │
+                ▼
+        ┌───────────────┐
+        │  PLAY_SENTENCE│◀──────────────┐
+        │  推第 n 句 mp3 │               │
+        └───────┬───────┘               │
+                │ TTS 队列清空            │
+                ▼                       │
+        ┌───────────────┐   超时/没开口   │
+        │  WAIT_REPEAT  │───────────────┤
+        │ 等孩子跟读     │  重播同一句     │
+        └───────┬───────┘  （最多 2 次）  │
+                │ 收到 ASR 文本          │
+                ▼                       │
+        ┌───────────────┐   不达标        │
+        │    JUDGE      │───────────────┘
+        │ 相似度比对     │
+        └───────┬───────┘
+                │ 达标
+                ▼
+        ┌───────────────┐
+        │  下一句 / 结束  │
+        └───────────────┘
+</code></pre>
+<p><strong>关键设计</strong>：状态机挂在"每轮用户输入到达时"，不依赖"播放结束回调"。</p>
+<p>理由：播放结束没有可靠回调，但孩子一开口就必然产生一轮新的用户输入。用"收到输入"驱动，状态机永远往前走，不会卡死。</p>
+<hr />
+<h2 id="3">3. 数据结构</h2>
+<p><code>lessons/L1/003_animals/lesson.json</code>：</p>
+<pre><code class="language-json">{
+  &quot;title&quot;: &quot;Animals&quot;,
+  &quot;sentences&quot;: [
+    {&quot;file&quot;: &quot;01.mp3&quot;, &quot;text&quot;: &quot;Look at the cat.&quot;,     &quot;min_score&quot;: 0.55},
+    {&quot;file&quot;: &quot;02.mp3&quot;, &quot;text&quot;: &quot;The cat is sleeping.&quot;, &quot;min_score&quot;: 0.55},
+    {&quot;file&quot;: &quot;03.mp3&quot;, &quot;text&quot;: &quot;Do you like cats?&quot;,    &quot;min_score&quot;: 0.50}
+  ]
+}
+</code></pre>
+<ul>
+<li><code>text</code> 是判定用的参考句，<strong>必须和音频内容一致</strong>；</li>
+<li><code>min_score</code> 按句子长度调：短句容易误判（"Yes." 这类），阈值要高一点；</li>
+<li>没有 <code>lesson.json</code> 就退化成"按目录顺序播"，不做判定。</li>
+</ul>
+<p><strong>一条音频 = 一句话</strong>，这是硬约束（否则没法逐句播）。</p>
+<hr />
+<h2 id="4-v1-api">4. 判定算法（v1，不上评分 API）</h2>
+<pre><code class="language-python">import difflib, re
+
+def norm(s):
+    s = s.lower().strip()
+    s = re.sub(r&quot;[^a-z0-9' ]&quot;, &quot;&quot;, s)     # 去掉标点
+    return re.sub(r&quot;\s+&quot;, &quot; &quot;, s)
+
+def score(said, target):
+    return difflib.SequenceMatcher(None, norm(said), norm(target)).ratio()
+</code></pre>
+<p>判定规则：</p>
+<table>
+<thead>
+<tr>
+<th>情况</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>score ≥ min_score</code></td>
+<td>通过 → 夸一句（"很好，下一个"）→ 下一句</td>
+</tr>
+<tr>
+<td><code>0.3 ≤ score &lt; min_score</code></td>
+<td>接近 → 提示具体问题（"cat 再读一次"）→ 重播</td>
+</tr>
+<tr>
+<td><code>score &lt; 0.3</code> 且孩子说了中文</td>
+<td>用中文引导（"跟着我读：Look at the cat"）→ 重播</td>
+</tr>
+<tr>
+<td>8 秒没声音</td>
+<td>重播一次；连续两次没声音 → 停在这个句子，等孩子说"继续"</td>
+</tr>
+<tr>
+<td>连续 2 次不达标</td>
+<td>直接下一句（不卡住孩子，挫败感比准确性重要）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>v2 才考虑</strong>：接口语评测 API（讯飞/微软/ELSA）做音素级评分。那需要把孩子的 wav 传给第三方——小智服务端能拿到音频流，但要自己加钩子，工作量 2~3 天。</p>
+<hr />
+<h2 id="5-llm">5. 跟读模式下要不要 LLM</h2>
+<p><strong>不要，或者只让它说"串场词"。</strong></p>
+<p>理由：
+- 判定是确定性逻辑，用 LLM 判会增加 1~2 秒延迟，还可能判错；
+- 孩子跟读时说的话很短（"Look at the cat"），LLM 容易过度解读。</p>
+<p>实现：插件里加一个"会话模式"标记。处于跟读模式时，<strong>在意图处理层拦截</strong>，不进入 LLM 对话流程；只有孩子说"不读了/换一课/这是啥意思"这类跳出指令时才回到 LLM。</p>
+<hr />
+<h2 id="6">6. 三个必须接受的限制</h2>
+<table>
+<thead>
+<tr>
+<th>限制</th>
+<th>说明</th>
+<th>缓解</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>延迟 1~2 秒</strong></td>
+<td>孩子读完 → ASR → 比对 → 播下一句</td>
+<td>播下一句前先说一个短词（"嗯"）填空；或用流式 ASR</td>
+</tr>
+<tr>
+<td><strong>句子边界要你提供</strong></td>
+<td>一条音频必须是一句话</td>
+<td>教材自带逐句音频最好；否则 ffmpeg 静音切分，准确率 80~90%，人工听一遍修</td>
+</tr>
+<tr>
+<td><strong>没有音素级评分</strong></td>
+<td>v1 只判"读得像不像"，不判"th 有没有咬舌"</td>
+<td>v2 接评测 API</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="7">7. 音频从哪来（三条路）</h2>
+<table>
+<thead>
+<tr>
+<th>来源</th>
+<th>做法</th>
+<th>质量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>教材自带逐句音频（RAZ、牛津树部分版本）</td>
+<td>直接用，最省事</td>
+<td>★★★</td>
+</tr>
+<tr>
+<td>一整段音频 → 自动切分</td>
+<td><code>ffmpeg -af silencedetect</code> 找静音点切，再人工听一遍合并/拆分</td>
+<td>★★</td>
+</tr>
+<tr>
+<td>只有文字没有音频</td>
+<td>用 TTS 生成（edge-tts 英文童声 <code>en-US-AnaNeural</code>）</td>
+<td>★（不是原声，但可控）</td>
+</tr>
+</tbody>
+</table>
+<p>切分命令示例：</p>
+<pre><code class="language-bash">ffmpeg -i lesson.mp3 -af silencedetect=noise=-35dB:d=0.45 -f null - 2&gt;&amp;1 | grep silence
+# 按输出时间点，切成一堆 001.mp3 002.mp3 …
+</code></pre>
+<hr />
+<h2 id="8">8. 验收标准（可测）</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>场景</th>
+<th>期望</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>说"跟读第三课"</td>
+<td>播第 1 句，播完停住等孩子</td>
+</tr>
+<tr>
+<td>2</td>
+<td>孩子正确跟读</td>
+<td>≤ 2 秒内播第 2 句</td>
+</tr>
+<tr>
+<td>3</td>
+<td>孩子读错</td>
+<td>重播同一句，并提示哪里不对</td>
+</tr>
+<tr>
+<td>4</td>
+<td>孩子 8 秒不说话</td>
+<td>重播一次；再不说话就停住等"继续"</td>
+</tr>
+<tr>
+<td>5</td>
+<td>孩子说"不读了"</td>
+<td>退出跟读，回到普通对话</td>
+</tr>
+<tr>
+<td>6</td>
+<td>中途断电</td>
+<td>恢复后能"接着跟读"，从那一句继续</td>
+</tr>
+<tr>
+<td>7</td>
+<td>连续 2 次读错</td>
+<td>不卡住，自动进下一句</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9">9. 迭代路线</h2>
+<table>
+<thead>
+<tr>
+<th>版本</th>
+<th>做什么</th>
+<th>工期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>v1</strong></td>
+<td>逐句播放 + 等待 + 相似度判定 + 重试</td>
+<td>2~3 天</td>
+</tr>
+<tr>
+<td>v1.5</td>
+<td>进度记录、断点续跟、跟读统计（哪几句老读错）</td>
+<td>+1 天</td>
+</tr>
+<tr>
+<td>v2</td>
+<td>接口语评测 API，音素级打分</td>
+<td>+2~3 天</td>
+</tr>
+<tr>
+<td>v3</td>
+<td>错句自动进"复习队列"（Leitner 盒子）</td>
+<td>+1 天</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="10">10. 唯一需要先验证的事</h2>
+<p><strong>"TTS 播完后，设备是否自动回到聆听状态。"</strong></p>
+<ul>
+<li>如果自动回（多数固件默认是连续对话模式）→ 上面的设计直接成立；</li>
+<li>如果不回 → 服务端在每句后追问一句"该你了，跟着读"，用 LLM 触发下一轮聆听；或者用"句子 + 3 秒静音"拼成一个文件播，走固定节奏。</li>
+</ul>
+<p>板子到手后第一件事就是测这个：说一句话，等它说完，然后<strong>不说话</strong>，看它是否继续听你。能继续听 = 设计成立。</p>
+</div></body></html>

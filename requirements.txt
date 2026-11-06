@@ -1,0 +1,14 @@
+# 全套依赖（= core + audio）。只想先跑起来，用 requirements-core.txt 就够。
+#   pip install -r requirements-core.txt     # 文字模式 / 脚本验收 / 播放音频
+#   pip install -r requirements-audio.txt    # 再加麦克风与离线唤醒
+#   pip install -r requirements.txt          # 两个都装
+
+# ---- core ----
+requests>=2.31
+edge-tts>=7.2.8
+
+# ---- audio（可选）----
+sounddevice>=0.4.6
+numpy>=1.24
+openwakeword>=0.6
+onnxruntime>=1.16

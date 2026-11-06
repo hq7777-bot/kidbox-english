@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>03_服务端部署清单</title><style>
+:root{--fg:#1a1a1a;--muted:#5f6b7a;--line:#e3e8ef;--accent:#c0392b;--accent2:#0f766e;
+--bg:#fbfcfd;--card:#fff;--warn:#fff8e6;--warnline:#f0c36d;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+.wrap{max-width:1000px;margin:0 auto;padding:48px 28px 96px;background:var(--card);
+box-shadow:0 0 0 1px var(--line);}
+h1{font-size:30px;line-height:1.35;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:22px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--line);}
+h3{font-size:17px;margin:26px 0 10px;color:var(--accent2)}
+p,li{color:#243040}
+blockquote{margin:16px 0;padding:12px 16px;background:var(--warn);border-left:4px solid var(--warnline);
+border-radius:0 6px 6px 0;color:#5a4a1f}
+blockquote p{margin:0;color:#5a4a1f}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;display:table}
+th,td{border:1px solid var(--line);padding:9px 11px;vertical-align:top;text-align:left}
+th{background:#f4f7fa;font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:#fafbfc}
+code{background:#f2f5f9;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+font:13.5px/1.5 "Cascadia Code",Consolas,monospace;color:#b03a2e}
+pre{background:#1f2430;color:#dfe6f3;padding:16px 18px;border-radius:8px;overflow:auto;
+font:13.5px/1.6 "Cascadia Code",Consolas,monospace;margin:16px 0}
+pre code{background:none;border:0;color:inherit;padding:0;font-size:13.5px}
+a{color:#0b6bcb;text-decoration:none;border-bottom:1px solid #bcd7f4}
+hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+ul,ol{padding-left:22px}
+li{margin:4px 0}
+.meta{color:var(--muted);font-size:14px;margin-bottom:26px}
+h2:first-of-type{margin-top:32px}
+@media print{body{background:#fff}.wrap{box-shadow:none;max-width:none;padding:0}
+h2{page-break-after:avoid}table{page-break-inside:avoid}}
+</style></head>
+<body><div class="wrap">
+<h1 id="windows">服务端部署清单（旧笔记本 · Windows）</h1>
+<blockquote>
+<p>目标：让旧笔记本变成 VoCat 的"大脑"，能听懂、能回答、能播你的教材音频
+预计 1~2 小时（下载占大头）｜每一步都有"验收"，过了再往下</p>
+</blockquote>
+<hr />
+<h2 id="020">阶段 0：给笔记本做准备（20 分钟）</h2>
+<h3 id="01-docker">0.1 先确认能不能跑 Docker</h3>
+<ul>
+<li>[ ] Win10 2004 以上 或 Win11</li>
+<li>[ ] 任务管理器 → 性能 → CPU，看有没有 <strong>"虚拟化：已启用"</strong></li>
+<li>如果是"已禁用"：进 BIOS 打开 VT-x / SVM（开机按 F2/F10/Del，找 Virtualization）</li>
+<li>[ ] 内存 ≥ 8GB</li>
+</ul>
+<h3 id="02-docker-desktop">0.2 装 Docker Desktop</h3>
+<ul>
+<li>[ ] 下载：<a href="https://www.docker.com/products/docker-desktop/">https://www.docker.com/products/docker-desktop/</a></li>
+<li>[ ] 安装时勾选 <strong>Use WSL 2 instead of Hyper-V</strong></li>
+<li>[ ] 装完重启，打开 Docker Desktop，左下角显示 <strong>Engine running</strong> 才算好</li>
+</ul>
+<p>验证（开 PowerShell）：</p>
+<pre><code class="language-powershell">docker version
+</code></pre>
+<p>看到 Client 和 Server 两段 = 成功。</p>
+<h3 id="03">0.3 关掉睡眠（必须）</h3>
+<p>控制面板 → 电源选项 → 更改计划设置：</p>
+<ul>
+<li>[ ] 关闭显示器：<strong>从不</strong></li>
+<li>[ ] 使计算机进入睡眠状态：<strong>从不</strong></li>
+<li>[ ] 更改高级电源设置 → 硬盘 → 在此时间后关闭硬盘：<strong>从不</strong></li>
+<li>[ ] 选择关闭盖子的功能：<strong>不采取任何操作</strong></li>
+</ul>
+<hr />
+<h2 id="15">阶段 1：建目录（5 分钟）</h2>
+<p>在你想放的位置（建议 <code>D:\xiaozhi-server</code>）建这个结构：</p>
+<pre><code>D:\xiaozhi-server\
+  ├─ docker-compose.yml
+  ├─ data\
+  │    ├─ .config.yaml
+  │    └─ lessons\          ← 你的教材音频放这里
+  │         └─ L1\001_hello\001.mp3
+  └─ models\
+       └─ SenseVoiceSmall\
+            └─ model.pt
+</code></pre>
+<ul>
+<li>[ ] 目录建好</li>
+</ul>
+<blockquote>
+<p>为什么必须是这个结构：compose 里写死了
+<code>./data:/opt/xiaozhi-esp32-server/data</code> 和
+<code>./models/SenseVoiceSmall/model.pt:/opt/.../model.pt</code></p>
+</blockquote>
+<hr />
+<h2 id="21030">阶段 2：下载语音识别模型（10~30 分钟，看网速）</h2>
+<ul>
+<li>[ ] 下载（约 900MB，魔搭直链，国内快）：
+      <a href="https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt">https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt</a></li>
+<li>[ ] 放到 <code>D:\xiaozhi-server\models\SenseVoiceSmall\model.pt</code></li>
+</ul>
+<p><strong>验收</strong>：文件大小 &gt; 800MB，不是 0KB 的 HTML。</p>
+<blockquote>
+<p>百度网盘备用（提取码 qvna）：<a href="https://pan.baidu.com/share/init?surl=QlgM58FHhYv1tFnUT_A8Sg&amp;pwd=qvna">https://pan.baidu.com/share/init?surl=QlgM58FHhYv1tFnUT_A8Sg&amp;pwd=qvna</a>
+缺这个文件 = 容器起不来，这是最常见的失败原因。</p>
+</blockquote>
+<hr />
+<h2 id="35">阶段 3：下载两个配置文件（5 分钟）</h2>
+<ul>
+<li>[ ] <code>docker-compose.yml</code> → 放到 <code>D:\xiaozhi-server\</code>
+      <a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/raw/main/main/xiaozhi-server/docker-compose.yml">https://github.com/xinnan-tech/xiaozhi-esp32-server/raw/main/main/xiaozhi-server/docker-compose.yml</a></li>
+<li>[ ] <code>config.yaml</code> → 放到 <code>D:\xiaozhi-server\data\</code>，<strong>重命名为 <code>.config.yaml</code></strong>（前面有个点）
+      <a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/raw/main/main/xiaozhi-server/config.yaml">https://github.com/xinnan-tech/xiaozhi-esp32-server/raw/main/main/xiaozhi-server/config.yaml</a></li>
+</ul>
+<blockquote>
+<p>下载链接打不开就用 GitHub 网页 → 文件页 → 右上角 RAW → 另存为。</p>
+</blockquote>
+<hr />
+<h2 id="410-4">阶段 4：改配置（10 分钟，只改 4 处）</h2>
+<p>用记事本打开 <code>D:\xiaozhi-server\data\.config.yaml</code>，找到这几行改：</p>
+<h3 id="1-deepseek">① 换大脑为 DeepSeek</h3>
+<p>找到 <code>selected_module:</code> 段，把 <code>LLM:</code> 改成：</p>
+<pre><code class="language-yaml">selected_module:
+  VAD: SileroVAD
+  ASR: FunASR
+  LLM: DeepSeekLLM        # ← 原来是 ChatGLMLLM
+  VLLM: ChatGLMVLLM
+  TTS: EdgeTTS
+  Memory: mem_local_short  # 原来是 nomem，打开短期记忆
+  Intent: function_call
+</code></pre>
+<h3 id="2-deepseek-key">② 填 DeepSeek Key</h3>
+<p>同一个文件，找 <code>DeepSeekLLM:</code> 段：</p>
+<pre><code class="language-yaml">LLM:
+  DeepSeekLLM:
+    type: openai
+    model_name: deepseek-flash        # 官网现名；写 deepseek-v4-flash 也能跑
+    url: https://api.deepseek.com
+    api_key: sk-你的key               # ← 填这里
+</code></pre>
+<p>Key 在 <a href="https://platform.deepseek.com/api_keys">https://platform.deepseek.com/api_keys</a> 申请（充 10 块钱就够用很久）。</p>
+<h3 id="3">③ 把音乐目录指向你的教材</h3>
+<p>文件末尾加（如果已有 <code>plugins:</code> 就加在它下面）：</p>
+<pre><code class="language-yaml">plugins:
+  play_music:
+    music_dir: /opt/xiaozhi-esp32-server/data/lessons
+    refresh_time: 30
+</code></pre>
+<p><strong>注意是容器内绝对路径</strong>，不是你电脑上的 <code>D:\...</code>。</p>
+<h3 id="4">④ （可选）改成中文小孩友好的音色</h3>
+<pre><code class="language-yaml">TTS:
+  EdgeTTS:
+    voice: zh-CN-XiaoyiNeural
+</code></pre>
+<hr />
+<h2 id="55">阶段 5：放音频（5 分钟）</h2>
+<p>按这个规范丢进去（<strong>文件名用英文数字</strong>）：</p>
+<pre><code>D:\xiaozhi-server\data\lessons\
+  L1\
+    001_hello\
+      001.mp3  002.mp3  003.mp3
+  L2\
+    001_animals\
+      001.mp3
+</code></pre>
+<ul>
+<li>[ ] 至少放了 1 个 mp3，用来做第一次验证</li>
+</ul>
+<hr />
+<h2 id="65">阶段 6：启动（5 分钟）</h2>
+<pre><code class="language-powershell">cd D:\xiaozhi-server
+docker compose up -d
+docker logs -f xiaozhi-esp32-server
+</code></pre>
+<p><strong>看到这样的日志 = 成功</strong>（IP 会是你的）：</p>
+<pre><code>INFO-OTA接口是        http://192.168.1.25:8003/xiaozhi/ota/
+INFO-Websocket地址是  ws://192.168.1.25:8000/xiaozhi/v1/
+</code></pre>
+<p>按 <code>Ctrl+C</code> 退出日志查看（不会停容器）。</p>
+<p><strong>验收</strong>：</p>
+<pre><code class="language-powershell">docker ps
+</code></pre>
+<p>看到 <code>xiaozhi-esp32-server</code> 状态是 <code>Up</code>。</p>
+<hr />
+<h2 id="7-ip5">阶段 7：放行防火墙 + 记下 IP（5 分钟）</h2>
+<pre><code class="language-powershell"># 以管理员身份运行 PowerShell
+netsh advfirewall firewall add rule name=&quot;xiaozhi&quot; dir=in action=allow protocol=TCP localport=8000,8003
+
+ipconfig
+</code></pre>
+<ul>
+<li>[ ] 记下 <code>IPv4 地址</code>，例如 <code>192.168.1.25</code></li>
+</ul>
+<hr />
+<h2 id="8-vocat-5">阶段 8：让 VoCat 连过来（5 分钟）</h2>
+<ul>
+<li>[ ] 长按 VoCat 的 BOOT 键，进入配网（屏幕/语音会提示）</li>
+<li>[ ] 手机连 <code>Xiaozhi-XXXX</code></li>
+<li>[ ] 浏览器打开 <code>192.168.4.1</code></li>
+<li>[ ] 找 <strong>「高级」</strong> 标签</li>
+<li>[ ] OTA 地址填：<code>http://192.168.1.25:8003/xiaozhi/ota/</code>（换成你记下的 IP）</li>
+<li>[ ] 保存 → 设备重启</li>
+</ul>
+<p><strong>验收</strong>：<code>docker logs -f</code> 里出现设备连接记录。</p>
+<hr />
+<h2 id="95">阶段 9：验收（5 分钟）</h2>
+<p>对 VoCat 说：</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>说</th>
+<th>期望</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>你好</td>
+<td>有回应（DeepSeek 通了）</td>
+</tr>
+<tr>
+<td>2</td>
+<td>你叫什么名字</td>
+<td>自然对话</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>播放 001</strong></td>
+<td><strong>听到你自己的 mp3</strong>（核心验收）</td>
+</tr>
+<tr>
+<td>4</td>
+<td>播放音乐</td>
+<td>随机播一首</td>
+</tr>
+<tr>
+<td>5</td>
+<td>声音小一点</td>
+<td>音量变化（依赖 Intent 模块）</td>
+</tr>
+</tbody>
+</table>
+<p>第 3 条通了，你的核心链路就成立了。</p>
+<hr />
+<h2 id="_1">排错表（按现象查）</h2>
+<table>
+<thead>
+<tr>
+<th>现象</th>
+<th>原因</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docker compose up</code> 报 mount 错误</td>
+<td>目录结构不对</td>
+<td>按阶段 1 的树重建</td>
+</tr>
+<tr>
+<td>容器起来就退出</td>
+<td><strong>model.pt 没放对</strong></td>
+<td><code>docker logs</code> 会提示；检查是不是 0KB 的 HTML</td>
+</tr>
+<tr>
+<td>日志里有 OTA 地址但设备连不上</td>
+<td>防火墙 / IP 写错</td>
+<td>阶段 7；确认手机和电脑同一 WiFi</td>
+</tr>
+<tr>
+<td>设备连上了，说话没反应</td>
+<td>ASR 模型没加载</td>
+<td>看日志有没有 FunASR 加载成功</td>
+</tr>
+<tr>
+<td>能对话但不播音乐</td>
+<td>music_dir 路径错</td>
+<td><code>docker exec -it xiaozhi-esp32-server ls /opt/xiaozhi-esp32-server/data/lessons</code></td>
+</tr>
+<tr>
+<td>说"播放 xxx"它说找不到</td>
+<td>文件名对不上</td>
+<td>直接把文件名念出来；或改用 <code>play_lesson</code> 插件</td>
+</tr>
+<tr>
+<td>声音卡顿</td>
+<td>笔记本性能不足 / WiFi 差</td>
+<td>换有线网；ASR 改用云端</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_2">日常维护（记这四条就够）</h2>
+<pre><code class="language-powershell"># 看日志
+docker logs -f --tail 50 xiaozhi-esp32-server
+
+# 重启
+docker restart xiaozhi-esp32-server
+
+# 停 / 起
+docker stop xiaozhi-esp32-server
+docker start xiaozhi-esp32-server
+
+# 升级（先备份 data\.config.yaml！）
+docker compose pull
+docker compose up -d
+</code></pre>
+<ul>
+<li><strong>备份</strong>：<code>data\.config.yaml</code> 和 <code>data\lessons\</code> 拷一份到别处就行</li>
+<li><strong>开机自启</strong>：装了 Docker Desktop 并设成开机启动，容器带 <code>restart: always</code> 会自动起来</li>
+</ul>
+<hr />
+<h2 id="_3">下一步（跑通之后）</h2>
+<ol>
+<li>用 <code>tools/split_audio.py</code> 把整段音频切成一句一句</li>
+<li>换成 <code>bridge/xiaozhi_plugin/play_lesson.py</code>（按"第几级第几课"播 + 记进度）</li>
+<li>加跟读模式（见 <code>02_跟读模式设计.md</code>）</li>
+</ol>
+</div></body></html>
