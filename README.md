@@ -89,6 +89,7 @@
 | `plugin/play_music.py` | **生产用**：口语化匹配（`book三点三15课课文`）+ 只播序号播报 | ✅ 实测 |
 | `plugin/follow_reading.py` | **生产用**：逐句跟读状态机（v1） | ✅ 实测中 |
 | `plugin/loop_play.py` | **生产用**：整册 16 篇连播 / 循环 N 遍（磨耳朵背景音） | ✅ 逻辑已验 |
+| `plugin/review_play.py` | **生产用**：熟听——三单元滚动窗口×2遍，进度存盘可续 | ✅ 逻辑已验 |
 | `tools/split_lessons.py` | 教材整篇 → 逐句切分（ffmpeg 静音检测） | ✅ 1356 句 |
 | `tools/asr_segments.py` | 逐句 ASR，产出 `raw.json`（容器内跑） | ✅ 96 单元 |
 | `tools/build_lesson_json.py` | ASR 结果 LLM 校对 → `lesson.json` | ✅ 96 单元 |
