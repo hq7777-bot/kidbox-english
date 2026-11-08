@@ -14,9 +14,9 @@
 | 架构决策 | ✅ 设备 = 瘦终端；服务端 = 家里旧笔记本自建；大脑 = DeepSeek |
 | 本地原型 | ✅ `kidbox/` 可跑（22 项自检通过），验证"语音 → 决策 → 播放 → 记进度"整条链 |
 | 混合链路验证 | ✅ `bridge/` 两个进程模拟"设备 + 大脑"，端到端 2~3 秒 |
-| 服务端插件 | 🟡 `bridge/xiaozhi_plugin/play_lesson.py` 已写，未在真实服务端跑过 |
-| 切句工具 | ✅ `tools/split_audio.py` 实测可用（4 句音频切出 4 段） |
-| 部署 | ⬜ 待做（清单见 `03_服务端部署清单.md`） |
+| 服务端插件 | ✅ `plugin/play_music.py` 已实测（重写匹配+播报）、`plugin/follow_reading.py` 跟读 v1 已跑通 |
+| 切句工具 | ✅ `tools/split_audio.py`、`tools/split_lessons.py`（1356 句实测） |
+| 部署 | ✅ 已完成（2026-11-08，见 `docs/04_本机部署实录.md`） |
 
 ---
 
@@ -85,7 +85,14 @@
 | `bridge/device_agent.py` | 设备端 HTTP 服务（/play /stop /context /speak） | ✅ 端到端测过 |
 | `bridge/pc_brain.py` | PC 大脑（DeepSeek 工具调用 + TTS） | ✅ 2~3 秒 |
 | `bridge/test_e2e.py` | 端到端自动测试（8 项断言） | ✅ 通过 |
-| `bridge/xiaozhi_plugin/play_lesson.py` | **小智服务端插件**（正式形态） | 🟡 未在真服务端跑过 |
+| `bridge/xiaozhi_plugin/play_lesson.py` | **小智服务端插件（旧稿）**，已被 `plugin/` 下实测版本取代 | 🟡 保留参考 |
+| `plugin/play_music.py` | **生产用**：口语化匹配（`book三点三15课课文`）+ 只播序号播报 | ✅ 实测 |
+| `plugin/follow_reading.py` | **生产用**：逐句跟读状态机（v1） | ✅ 实测中 |
+| `tools/split_lessons.py` | 教材整篇 → 逐句切分（ffmpeg 静音检测） | ✅ 1356 句 |
+| `tools/asr_segments.py` | 逐句 ASR，产出 `raw.json`（容器内跑） | ✅ 96 单元 |
+| `tools/build_lesson_json.py` | ASR 结果 LLM 校对 → `lesson.json` | ✅ 96 单元 |
+| `tools/flash_vocat.py` | 一键刷机（自动找串口/识别 ESP32-S3） | ✅ |
+| `patches/xiaozhi-esp32-custom-wakeword.patch` | 上游固件自定义唤醒词补丁（构建脚本+板级配置） | ✅ |
 | `bridge/sapi_say.py` | Windows 本地 TTS（子进程，避免 pyttsx3 死锁） | ✅ |
 | `tools/split_audio.py` | 长音频切句 / 生成时间轴 | ✅ 实测 |
 | `build_html.py` | md → 带样式 html（打印用） | ✅ |

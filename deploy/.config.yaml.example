@@ -1,33 +1,88 @@
-# 把这个文件复制成 data/.config.yaml，然后改 4 处（都标了 ←改）
-# 完整原始配置见 https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/main/main/xiaozhi-server/config.yaml
-# 本文件只写"覆盖项"，没写的用默认值
+# 复制成 data/.config.yaml 使用。只写覆盖项，没写的用镜像默认值。
+# 这是本机跑通后的实际配置（已去掉 key）。
+
+server:
+  # 关键：不写这一行，OTA 会下发容器内网 IP（172.18.0.2），设备永远连不上
+  websocket: ws://192.168.1.10:8000/xiaozhi/v1/
 
 selected_module:
   VAD: SileroVAD
-  ASR: FunASR              # 本地 SenseVoiceSmall，免费离线
-  LLM: DeepSeekLLM         # ←改：默认是 ChatGLMLLM
-  VLLM: ChatGLMVLLM
-  TTS: EdgeTTS             # 免费，无需 key
-  Memory: mem_local_short  # ←改：默认 nomem（不记忆）
-  Intent: function_call    # 支持工具调用/音量控制
+  ASR: FunASR
+  LLM: DeepSeekLLM
+  VLLM: ChatGLMLLM
+  TTS: EdgeTTS
+  Memory: mem_local_short
+  Intent: function_call
+
+# 人设 + 说话规矩（给一年级孩子用，要求极简）
+prompt: |
+  你是「心心」，陪小学一年级孩子（何璟程）学英语的语音助手。你只说语音，不输出任何格式符号。
+
+  【说话规矩，必须遵守】
+  1. 极简：默认一句话，最多两句，总字数不超过 30 字。绝不解释自己在做什么。
+  2. 用户只是唤醒、或只说「你好」「在吗」时，只回一个字：「在」。
+  3. 用户说「退下」「拜拜」「没事了」「结束」「不聊了」时，只回：「拜拜」。
+  4. 用户要听课文/音频时：直接调用播放工具。严禁任何铺垫语（"让我们一起聆听""接下来请听"这类）。
+  5. 不讲道理、不列清单、不用反问句、不主动延伸话题。
+  6. 孩子没听懂，就用更短更简单的话重说一遍，不要重复原话。
+  7. 不知道就说「不知道」，不要编。
+  8. 【跟读模式】用户说「跟读 3-3 U15」这类话时，调用 follow_reading(action="start", unit="用户原话")。
+     此后孩子每说一句，都必须调用 follow_reading(action="check", said="孩子原话")，由工具判定，你不要自己回答。
+     孩子说「再读一次」用 action="repeat"；说「不读了/停」用 action="stop"。
+
+end_prompt:
+  enable: true
+  prompt: |
+    现在要结束对话了。只说两个字：「拜拜」。不要说别的。
+
+Memory:
+  mem_local_short:
+    llm: DeepSeekLLM        # 默认 ChatGLMLLM，没智谱 key 会一直报 API key 未设置
+
+VAD:
+  SileroVAD:
+    type: silero
+    threshold: 0.5
+    threshold_low: 0.3
+    model_dir: models/snakers4_silero-vad
+    min_silence_duration_ms: 800   # 默认 200 太短：孩子换口气就被判"说完了"
+
+ASR:
+  FunASR:
+    type: fun_local
+    model_dir: models/SenseVoiceSmall
+    output_dir: tmp/
+    language: auto          # auto=中英混合；纯中文更稳可改 zh
 
 LLM:
   DeepSeekLLM:
     type: openai
-    model_name: deepseek-flash      # 旧名 deepseek-v4-flash 也能跑
+    model_name: deepseek-flash       # 账号下只有 deepseek-flash / deepseek-v4-pro
     url: https://api.deepseek.com
-    api_key: sk-REPLACE_ME          # ←改：platform.deepseek.com 申请
+    api_key: sk-你的key
+    max_tokens: 120                  # 配合人设压住啰嗦
+    temperature: 0.3
 
 TTS:
   EdgeTTS:
-    voice: zh-CN-XiaoyiNeural       # ←改（可选）：中文童声，默认可能是 Xiaoxiao
+    voice: zh-CN-XiaoyiNeural
 
 plugins:
   play_music:
-    # 容器内绝对路径！宿主机 ./data 映射到 /opt/xiaozhi-esp32-server/data
     music_dir: /opt/xiaozhi-esp32-server/data/lessons
     refresh_time: 30
 
-# 儿童场景建议（按需打开）
+# 跟读插件必须写进白名单，否则模型看不到这个工具（只会调 play_music 整篇播）
+Intent:
+  function_call:
+    type: function_call
+    functions:
+      - follow_reading
+      - change_role
+      - web_search
+      - get_weather
+      - get_news_from_newsnow
+      - play_music
+
 close_connection_no_voice_time: 120
 delete_audio: true

@@ -1,0 +1,107 @@
+diff --git a/main/boards/espressif/esp-vocat/config.json b/main/boards/espressif/esp-vocat/config.json
+index 12f91a4..d806336 100644
+--- a/main/boards/espressif/esp-vocat/config.json
++++ b/main/boards/espressif/esp-vocat/config.json
+@@ -5,11 +5,31 @@
+     "builds": [
+         {
+             "name": "esp-vocat",
+-             "sdkconfig_append": [
+-                 "CONFIG_USE_EMOTE_MESSAGE_STYLE=y",
+-                 "CONFIG_MMAP_FILE_NAME_LENGTH=32",
+-                 "CONFIG_FLASH_EXPRESSION_ASSETS=y"
+-             ]
++            "sdkconfig_append": [
++                "CONFIG_USE_EMOTE_MESSAGE_STYLE=y",
++                "CONFIG_MMAP_FILE_NAME_LENGTH=32",
++                "CONFIG_FLASH_EXPRESSION_ASSETS=y"
++            ]
++        },
++        {
++            "name": "esp-vocat-xinxin",
++            "sdkconfig_append": [
++                "CONFIG_USE_EMOTE_MESSAGE_STYLE=y",
++                "CONFIG_MMAP_FILE_NAME_LENGTH=32",
++                "CONFIG_FLASH_EXPRESSION_ASSETS=y",
++                "CONFIG_WAKE_WORD_DISABLED=n",
++                "CONFIG_USE_ESP_WAKE_WORD=n",
++                "CONFIG_USE_AFE_WAKE_WORD=n",
++                "CONFIG_USE_CUSTOM_WAKE_WORD=y",
++                "CONFIG_CUSTOM_WAKE_WORD=\"ni hao xin xin|xin xin tong xue|hai xin xin|ha lou xin xin\"",
++                "CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\"你好心心|心心同学|嗨心心|哈喽心心\"",
++                "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=15",
++                "CONFIG_SEND_WAKE_WORD_DATA=y",
++                "CONFIG_USE_DEVICE_AEC=y",
++                "CONFIG_SR_MN_CN_MULTINET7_AC_QUANT=y",
++                "CONFIG_SR_MN_CN_MULTINET7_QUANT=n",
++                "CONFIG_SR_MN_CN_MULTINET6_QUANT=n"
++            ]
+         }
+     ]
+ }
+diff --git a/scripts/build.py b/scripts/build.py
+index f3452ef..46c87a0 100755
+--- a/scripts/build.py
++++ b/scripts/build.py
+@@ -1650,6 +1650,31 @@ def build_board(
+             sdkconfig_append,
+             user_options,
+         )
++
++        # 板级显式写死的唤醒词配置优先于自动生成项（用于 MultiNet 自定义唤醒词，
++        # 例如 CONFIG_USE_CUSTOM_WAKE_WORD=y + CONFIG_CUSTOM_WAKE_WORD="xin xin tong xue"）
++        _board_append = build.get("sdkconfig_append", []) or []
++        _wake_exact = {
++            "CONFIG_USE_CUSTOM_WAKE_WORD",
++            "CONFIG_USE_AFE_WAKE_WORD",
++            "CONFIG_USE_ESP_WAKE_WORD",
++            "CONFIG_WAKE_WORD_DISABLED",
++        }
++        _board_wake = [
++            item for item in _board_append
++            if isinstance(item, str) and (
++                item.split("=", 1)[0] in _wake_exact
++                or item.split("=", 1)[0].startswith("CONFIG_CUSTOM_WAKE_WORD")
++            )
++        ]
++        if _board_wake:
++            sdkconfig_append = _merge_sdkconfig_options(sdkconfig_append, _board_wake)
++            print(f"board-level wake word override: {_board_wake}")
++            # 板级接管唤醒词后，CLI 的 --wake-word 校验必然对不上，跳过它
++            validation_symbols = [
++                entry for entry in validation_symbols if entry[1] != "--wake-word"
++            ]
++
+         sdkconfig_append = _apply_auto_selects(sdkconfig_append)
+ 
+         print("-" * 80)
+diff --git a/scripts/build_default_assets.py b/scripts/build_default_assets.py
+index 0bd5027..65e2e00 100755
+--- a/scripts/build_default_assets.py
++++ b/scripts/build_default_assets.py
+@@ -1063,17 +1063,18 @@ def main():
+         language = get_language_from_multinet_models(multinet_model_names)
+         
+         # Build multinet_model info structure
++        # 支持多个唤醒词：CONFIG_CUSTOM_WAKE_WORD 用 '|' 分隔，DISPLAY 同序对应
++        _words = [w.strip() for w in str(custom_wake_word_config['wake_word']).split('|') if w.strip()]
++        _displays = [d.strip() for d in str(custom_wake_word_config.get('display', '')).split('|')]
++        _commands = []
++        for _i, _w in enumerate(_words):
++            _text = _displays[_i] if _i < len(_displays) and _displays[_i] else _w
++            _commands.append({"command": _w, "text": _text, "action": "wake"})
+         multinet_model_info = {
+             "language": language,
+             "duration": 3000,  # Default duration in ms
+             "threshold": custom_wake_word_config['threshold'],
+-            "commands": [
+-                {
+-                    "command": custom_wake_word_config['wake_word'],
+-                    "text": custom_wake_word_config['display'],
+-                    "action": "wake"
+-                }
+-            ]
++            "commands": _commands,
+         }
+         print(f"  custom wake word: {custom_wake_word_config['wake_word']} ({custom_wake_word_config['display']})")
+         print(f"  wake word language: {language}")
