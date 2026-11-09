@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>08_唤醒延迟与屏幕显示</title><style>
+:root{--fg:#1a1a1a;--muted:#5f6b7a;--line:#e3e8ef;--accent:#c0392b;--accent2:#0f766e;
+--bg:#fbfcfd;--card:#fff;--warn:#fff8e6;--warnline:#f0c36d;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+.wrap{max-width:1000px;margin:0 auto;padding:48px 28px 96px;background:var(--card);
+box-shadow:0 0 0 1px var(--line);}
+h1{font-size:30px;line-height:1.35;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:22px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--line);}
+h3{font-size:17px;margin:26px 0 10px;color:var(--accent2)}
+p,li{color:#243040}
+blockquote{margin:16px 0;padding:12px 16px;background:var(--warn);border-left:4px solid var(--warnline);
+border-radius:0 6px 6px 0;color:#5a4a1f}
+blockquote p{margin:0;color:#5a4a1f}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;display:table}
+th,td{border:1px solid var(--line);padding:9px 11px;vertical-align:top;text-align:left}
+th{background:#f4f7fa;font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:#fafbfc}
+code{background:#f2f5f9;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+font:13.5px/1.5 "Cascadia Code",Consolas,monospace;color:#b03a2e}
+pre{background:#1f2430;color:#dfe6f3;padding:16px 18px;border-radius:8px;overflow:auto;
+font:13.5px/1.6 "Cascadia Code",Consolas,monospace;margin:16px 0}
+pre code{background:none;border:0;color:inherit;padding:0;font-size:13.5px}
+a{color:#0b6bcb;text-decoration:none;border-bottom:1px solid #bcd7f4}
+hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+ul,ol{padding-left:22px}
+li{margin:4px 0}
+.meta{color:var(--muted);font-size:14px;margin-bottom:26px}
+h2:first-of-type{margin-top:32px}
+@media print{body{background:#fff}.wrap{box-shadow:none;max-width:none;padding:0}
+h2{page-break-after:avoid}table{page-break-inside:avoid}}
+</style></head>
+<body><div class="wrap">
+<h1 id="_1">唤醒延迟 &amp; 屏幕显示文字</h1>
+<blockquote>
+<p>结论先行：
+1. 唤醒慢的根因是<strong>用了 MultiNet 自定义唤醒词</strong>（命令词识别），不是 WakeNet 唤醒检测；再加上配了 <strong>4 个别名</strong>。
+2. 屏幕能显示对话和字幕，<strong>而且服务端代码已经在发文本了</strong>——只是固件编了 emote（猫脸）风格，没地方画字。</p>
+</blockquote>
+<hr />
+<h2 id="_2">一、唤醒延迟：先定位，再动手</h2>
+<p>"1 秒才有反应"可能指三个不同的点，优化手段完全不同。用串口日志看时间戳（你已有命令）：</p>
+<pre><code>py -3.13 -c &quot;import serial,time; s=serial.Serial('COM3',115200,timeout=0.5); s.dtr=False; s.rts=True; time.sleep(0.2); s.rts=False; time.sleep(0.3); print(s.read(20000).decode('utf-8','replace'))&quot;
+</code></pre>
+<p>要抓的关键行（按出现顺序）：</p>
+<table>
+<thead>
+<tr>
+<th>日志关键字</th>
+<th>含义</th>
+<th>这一段耗时说明什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wake word detected</code></td>
+<td>MultiNet 判定通过</td>
+<td>这一段的长度 = <strong>唤醒词识别耗时</strong></td>
+</tr>
+<tr>
+<td><code>Websocket connected</code> / <code>session</code></td>
+<td>连上服务器</td>
+<td>有这一段且耗时明显 → <strong>每次唤醒都在重连</strong></td>
+</tr>
+<tr>
+<td><code>listen start</code></td>
+<td>开始上传音频</td>
+<td></td>
+</tr>
+<tr>
+<td><code>tts start</code></td>
+<td>开始播回答</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>三段各自的典型值与对策：</strong></p>
+<table>
+<thead>
+<tr>
+<th>段</th>
+<th>正常</th>
+<th>你现在可能的瓶颈</th>
+<th>对策</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>喊完 → <code>wake word detected</code></td>
+<td>200~400ms</td>
+<td>MultiNet 要等词尾静音 + 4 个候选，可能 600~900ms</td>
+<td>砍成 1 个唤醒词；改回 WakeNet</td>
+</tr>
+<tr>
+<td>detected → <code>listen start</code></td>
+<td>50~150ms</td>
+<td>表情动画渲染、提示音解码</td>
+<td>关 emote、缩短提示音</td>
+</tr>
+<tr>
+<td>listen → 第一句回答</td>
+<td>1.5~3s</td>
+<td>重连 + ASR + LLM + TTS</td>
+<td>保持长连接（见下）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_3">二、唤醒慢的四个原因（按影响排序）</h2>
+<h3 id="1multinet-wakenet">原因 1：MultiNet ≠ WakeNet（最大头）</h3>
+<p>你的补丁里是：</p>
+<pre><code>CONFIG_USE_CUSTOM_WAKE_WORD=y
+CONFIG_CUSTOM_WAKE_WORD=&quot;ni hao xin xin|xin xin tong xue|hai xin xin|ha lou xin xin&quot;
+CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=15
+</code></pre>
+<ul>
+<li><strong>WakeNet</strong> = 专门的唤醒词检测网络，<strong>流式</strong>，词尾一到就出结果，100~200ms。</li>
+<li><strong>MultiNet</strong> = 命令词识别网络，要<strong>等你把词说完、并检测到一段静音</strong>才敢判定，天然慢一倍以上。</li>
+<li>而 <code>duration: 3000</code>（补丁里 <code>build_default_assets.py</code> 的默认值）意味着模型窗口按 3 秒算，判定更保守。</li>
+</ul>
+<p><strong>改法（见效最快）</strong>：</p>
+<pre><code class="language-json">&quot;CONFIG_CUSTOM_WAKE_WORD=\&quot;ni hao xin xin\&quot;&quot;,
+&quot;CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\&quot;你好心心\&quot;&quot;,
+</code></pre>
+<p>只留一个词。<strong>4 个候选 → 1 个</strong>，误唤醒率和判定耗时都会降。</p>
+<blockquote>
+<p>如果接受换词，最彻底的办法是用 WakeNet 内置中文词（如"你好小智"），一级检测，再快 200~300ms。
+但孩子叫惯了"心心"，那就保留 MultiNet + 单候选，这是折中最优。</p>
+</blockquote>
+<h3 id="2">原因 2：每次唤醒都可能重连服务器</h3>
+<p><code>.config.yaml</code> 里 <code>close_connection_no_voice_time: 120</code>——120 秒没声音就断。孩子玩一会儿停一会儿，下次唤醒就要<strong>重新握手 + 重新建会话</strong>，这一段在公网/局域网都要 300~800ms。</p>
+<p><strong>改法</strong>：调到 600（10 分钟）甚至更大。代价是服务器上多占一点连接数，单设备无所谓。</p>
+<pre><code class="language-yaml">close_connection_no_voice_time: 600
+</code></pre>
+<h3 id="3cpu">原因 3：CPU 没跑满</h3>
+<p>ESP32-S3 默认可能跑 160MHz。推理（AFE + MultiNet）吃 CPU。</p>
+<pre><code># 检查你编译时的 sdkconfig
+grep CONFIG_ESP_DEFAULT_CPU_FREQ sdkconfig
+# 要看到 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+</code></pre>
+<p>没有就加上（<code>sdkconfig_append</code> 里写 <code>CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y</code>）。<strong>推理快 20~40%</strong>，代价是功耗 +30%（插电设备无所谓）。</p>
+<h3 id="4emote-cpu">原因 4：emote 动画在抢 CPU</h3>
+<p>猫脸表情是 LVGL 在 QSPI 屏上按帧渲染，唤醒瞬间要切表情、加载资源。关掉它（见下一节）能省一点，而且<strong>顺便解决问题 2</strong>。</p>
+<hr />
+<h2 id="flag">三、屏幕显示文字：改一个 flag 就行</h2>
+<p>VoCat 板级代码（<code>main/boards/espressif/esp-vocat/esp_vocat.cc</code>）：</p>
+<pre><code class="language-c">#if CONFIG_USE_EMOTE_MESSAGE_STYLE
+    display_ = new emote::EmoteDisplay(panel, panel_io, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+#else
+    display_ = new SpiLcdDisplay(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT, ...);
+#endif
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>flag</th>
+<th>屏幕长什么样</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CONFIG_USE_EMOTE_MESSAGE_STYLE=y</code>（你现在）</td>
+<td>猫脸表情，不显示对话文字</td>
+</tr>
+<tr>
+<td><code>CONFIG_USE_EMOTE_MESSAGE_STYLE=n</code></td>
+<td>普通 LCD 界面：<strong>用户说的话 + AI 回答 + 字幕都能显示</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键：服务端已经在发文本了。</strong> 你们的 <code>plugin/follow_reading.py</code> 里：</p>
+<pre><code class="language-python">conn.tts.store_tts_text(conn.sentence_id, item.get(&quot;text&quot;, &quot;&quot;))   # ← 已经是句子原文
+</code></pre>
+<p>服务端在 <code>sendAudioMessage()</code> 时把这段文本作为 <code>sentence_start</code> 的 <code>text</code> 发下去，
+固件收到后执行 <code>display-&gt;SetChatMessage("assistant", text)</code>（<code>application.cc:664</code>）。</p>
+<p><strong>也就是说：现在播每一句时，屏幕上其实"有字"，只是 emote 界面不画。改 flag 重编一版就能看见。</strong></p>
+<hr />
+<h2 id="esp-vocat-text">四、一举两得：编一个 <code>esp-vocat-text</code> 配置</h2>
+<p>在板级 <code>config.json</code> 的 <code>builds</code> 里加一档（保留原来那档，方便回退）：</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;esp-vocat-text&quot;,
+  &quot;sdkconfig_append&quot;: [
+    &quot;CONFIG_USE_EMOTE_MESSAGE_STYLE=n&quot;,
+    &quot;CONFIG_FLASH_EXPRESSION_ASSETS=n&quot;,
+    &quot;CONFIG_MMAP_FILE_NAME_LENGTH=32&quot;,
+    &quot;CONFIG_WAKE_WORD_DISABLED=n&quot;,
+    &quot;CONFIG_USE_ESP_WAKE_WORD=n&quot;,
+    &quot;CONFIG_USE_AFE_WAKE_WORD=n&quot;,
+    &quot;CONFIG_USE_CUSTOM_WAKE_WORD=y&quot;,
+    &quot;CONFIG_CUSTOM_WAKE_WORD=\&quot;ni hao xin xin\&quot;&quot;,
+    &quot;CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\&quot;你好心心\&quot;&quot;,
+    &quot;CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=15&quot;,
+    &quot;CONFIG_SEND_WAKE_WORD_DATA=y&quot;,
+    &quot;CONFIG_USE_DEVICE_AEC=y&quot;,
+    &quot;CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y&quot;,
+    &quot;CONFIG_SR_MN_CN_MULTINET7_AC_QUANT=y&quot;,
+    &quot;CONFIG_SR_MN_CN_MULTINET7_QUANT=n&quot;,
+    &quot;CONFIG_SR_MN_CN_MULTINET6_QUANT=n&quot;
+  ]
+}
+</code></pre>
+<p>编译：<code>tools/build_firmware_xinxin.bat</code>（把 board 名换成 <code>espressif/esp-vocat-text</code>）。</p>
+<p><strong>刷机只刷 app + assets，别刷整片</strong>（否则 WiFi 凭据被擦）：</p>
+<pre><code class="language-bash">py -3.13 -m esptool --chip esp32s3 -p COM3 -b 460800 write-flash \
+   0x20000 build/xiaozhi.bin 0x800000 build/configured_assets.bin
+</code></pre>
+<hr />
+<h2 id="_4">五、改完能到什么水平</h2>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>现在</th>
+<th>改完（估计）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>喊完 → 屏幕/提示音响应</td>
+<td>~800~1000ms</td>
+<td><strong>400~600ms</strong>（单候选 + 关 emote）</td>
+</tr>
+<tr>
+<td>会话重连</td>
+<td>每次唤醒可能重连</td>
+<td>基本不重连（10 分钟保活）</td>
+</tr>
+<tr>
+<td>屏幕上能否看到句子</td>
+<td>❌ 猫脸</td>
+<td>✅ 对话 + 每句英文字幕</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>注意：<strong>回答的第一句不会因此更快</strong>——那 1.5~2 秒是 ASR+LLM+TTS 的固有成本，只能靠"先说一句嗯"或流式输出优化。</p>
+</blockquote>
+<hr />
+<h2 id="_5">六、取舍</h2>
+<p>关掉 emote 的代价是失去表情动画。如果孩子喜欢猫脸眨眼，有两个折中：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>做法</th>
+<th>工作量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>分场景切换</td>
+<td>平时 emote、进跟读时切 SpiLcdDisplay</td>
+<td>1~2 天（C++）</td>
+</tr>
+<tr>
+<td>表情 + 一行字幕</td>
+<td>改 <code>EmoteDisplay</code>，底部加一行文本</td>
+<td>1 天（C++）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>建议先做"纯文字版"试三天</strong>，看孩子是更需要字幕还是更需要猫脸——这比自己猜准。</p>
+</div></body></html>
