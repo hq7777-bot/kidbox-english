@@ -389,4 +389,149 @@ def assess(wav_path: str, ref_text: str, key: str, region: str = &quot;eastasia&
 </tbody>
 </table>
 <p><strong>总计 3 天左右。</strong> 第 2 步是唯一的"外部依赖风险"——如果 Azure 注册不通、讯飞又不给音素级，整个方案就要退到本地 GOP（另算 1~2 周）。</p>
+<hr />
+<h2 id="10-v1-vs">10. 附录：v1 判定 vs 音素级（真数字对比）</h2>
+<p>v1 的判定函数（<code>plugin/follow_reading.py</code>）：</p>
+<pre><code class="language-python">def _score(said, target):
+    return difflib.SequenceMatcher(None, _norm(said), _norm(target)).ratio()
+</code></pre>
+<p><code>_norm</code> 只做小写 + 去标点 + 压空格，所以这是<strong>字符级</strong>相似度。阈值来自 <code>lesson.json</code> 的 <code>min_score</code>：≤3 词 0.70、≤6 词 0.60、更长 0.50。</p>
+<p>实际判定结果（本地跑出来的真实分数）：</p>
+<table>
+<thead>
+<tr>
+<th>目标句</th>
+<th>孩子实际（ASR 文本）</th>
+<th>分数</th>
+<th>阈值</th>
+<th>v1 判定</th>
+<th>真实情况</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Look at the cat.</td>
+<td>look at the cat</td>
+<td>1.00</td>
+<td>0.70</td>
+<td>通过</td>
+<td>完全读对</td>
+</tr>
+<tr>
+<td>Look at the cat.</td>
+<td>look at the <strong>s</strong>at</td>
+<td><strong>0.93</strong></td>
+<td>0.70</td>
+<td><strong>通过</strong></td>
+<td>/k/ 读成 /s/</td>
+</tr>
+<tr>
+<td>Look at the cat.</td>
+<td>look at the cat（ASR 自动纠正）</td>
+<td><strong>1.00</strong></td>
+<td>0.70</td>
+<td><strong>通过</strong></td>
+<td>音素错，但被 ASR 洗掉了</td>
+</tr>
+<tr>
+<td>Cool birds.</td>
+<td>cool bird</td>
+<td><strong>0.95</strong></td>
+<td>0.70</td>
+<td><strong>通过</strong></td>
+<td>漏了复数 s</td>
+</tr>
+<tr>
+<td>Penguins are so cute.</td>
+<td>penguin are so cute</td>
+<td><strong>0.97</strong></td>
+<td>0.50</td>
+<td><strong>通过</strong></td>
+<td>漏了复数 s</td>
+</tr>
+<tr>
+<td>I don't like it.</td>
+<td>like it</td>
+<td><strong>0.64</strong></td>
+<td>0.50</td>
+<td><strong>通过</strong></td>
+<td>漏读前半句</td>
+</tr>
+<tr>
+<td>Do you like cats?</td>
+<td>do you like cat</td>
+<td><strong>0.97</strong></td>
+<td>0.60</td>
+<td><strong>通过</strong></td>
+<td>漏复数</td>
+</tr>
+<tr>
+<td>Look at the cat.</td>
+<td>I like apples</td>
+<td>0.29</td>
+<td>0.70</td>
+<td>不通过</td>
+<td>完全无关</td>
+</tr>
+</tbody>
+</table>
+<p><strong>结论：v1 实际只拦得住"胡说八道"。</strong> 只要孩子在说英语、词沾边，就会通过。</p>
+<p>阈值有多松：<code>Look at the cat</code> 归一化后 15 个字符，阈值 0.70 允许错 4~5 个字符（≈ 一个单词），0.50 允许错 7 个（≈ 半句）。短句反而更松。</p>
+<p>两个方向的错判：</p>
+<ol>
+<li><strong>假通过（常见）</strong>：ASR 会把发音错误"纠正"成正确单词（语言模型先验），分数直接 1.00。<strong>这是结构性盲区，调阈值解决不了。</strong></li>
+<li><strong>假不通过（少见）</strong>：人名/生词被 ASR 听错（Ben→Men 还能过，Penguins→Pancakes 就会掉），孩子读对了却被要求重读。</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>v1（difflib）</th>
+<th>音素级评测</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>判定依据</td>
+<td>文本字符相似</td>
+<td>音频声学特征</td>
+</tr>
+<tr>
+<td>能发现发音错</td>
+<td>❌（ASR 已洗掉）</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>定位到哪个词</td>
+<td>❌ 只能整句重读</td>
+<td>✅「cat 再读一次」</td>
+</tr>
+<tr>
+<td>定位到哪个音</td>
+<td>❌</td>
+<td>✅「/k/ 只拿 30 分」</td>
+</tr>
+<tr>
+<td>漏读检测</td>
+<td>弱（漏半句 0.64 也过）</td>
+<td>✅ miscue 标记</td>
+</tr>
+<tr>
+<td>对 ASR 错误鲁棒</td>
+<td>差（完全依赖 ASR 文本）</td>
+<td>好（不看 ASR，直接评音频）</td>
+</tr>
+<tr>
+<td>额外延迟</td>
+<td>0</td>
+<td>0.6~1.5 s</td>
+</tr>
+<tr>
+<td>边际成本</td>
+<td>0</td>
+<td>免费额度内 0</td>
+</tr>
+</tbody>
+</table>
+<p><strong>一句话</strong>：v1 回答"<strong>有没有跟着念</strong>"，音素级回答"<strong>念得准不准</strong>"。</p>
 </div></body></html>
