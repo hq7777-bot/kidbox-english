@@ -51,7 +51,6 @@ raw.json
 loop_progress.json
 .progress.json
 
-# ===== 固件与刷机产物 =====
+# ===== 刷机产物（注意：不要忽略 firmware/，那是我们自己的补丁脚本）=====
 *.bin
-firmware/
 build/
