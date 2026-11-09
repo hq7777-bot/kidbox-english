@@ -9,7 +9,7 @@
 给一年级孩子做的英语学习硬件。孩子对着一个圆屏小盒子说话，它放教材音频、等孩子跟读、记进度、回答科普问题。
 
 - **硬件**：ESP-VoCat 1.0（ESP32-S3，已购买），刷小智（`78/xiaozhi-esp32`）官方固件
-- **大脑**：家里一台旧笔记本，跑 `xinnan-tech/xiaozhi-esp32-server`（Docker）
+- **大脑**：家里台式机（i9-13900KF / 64GB，`G:\xiaozhi-server`，IP `192.168.1.10`），跑 `xinnan-tech/xiaozhi-esp32-server`（Docker）
 - **模型**：DeepSeek（LLM）+ 本地 SenseVoice（ASR）+ edge-tts（TTS）
 - **用户**：孩子的家长，做银行需求分析，能读代码但不是嵌入式工程师；**要中文、要表格、要验收标准**
 
@@ -58,7 +58,7 @@
 
 ## 下一步（按顺序）
 
-1. 在旧笔记本跑 `deploy/setup.bat` → `03_服务端部署清单.md` 阶段 4~9
+1. 在常开的机器上跑 `deploy/setup.bat` → `03_服务端部署清单.md` 阶段 4~9（实测已按 `docs/04_本机部署实录.md` 走通）
 2. **验收 M1**：对 VoCat 说"播放 001"，听到 `data/lessons/L1/001_hello/001.mp3`
 3. M1 通了再改 `plugin/play_lesson.py`（分级 + 进度）
 4. 然后做跟读模式
@@ -95,4 +95,4 @@
 | DeepSeek 有语音模型吗 | 没有，API 只有文本；ASR/TTS 要另外接 |
 | VoCat 自带 ASR 吗 | 只自带唤醒词，ASR 在服务端 |
 | 一定要 GitHub 吗 | 不是必需，但用于备份/多机/版本管理 |
-| 用什么当服务器 | 旧笔记本（12W，自带 UPS），别用台式机（85W） |
+| 用什么当服务器 | **实测用了台式机**（i9-13900KF，C 盘满才把 Docker 数据搬到 G 盘）。旧笔记本方案仍成立（12W 更省电、自带 UPS），但当时手边台式机磁盘更宽松 |

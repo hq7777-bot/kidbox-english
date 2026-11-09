@@ -1,4 +1,6 @@
-"""play_lesson.py —— 给 xiaozhi-esp32-server 用的"播放英语课"插件。
+"""[DEPRECATED 旧稿，勿用] 生产版本是 plugin/play_music.py（重写匹配+播报）。本文件保留作为设计参考。
+
+play_lesson.py —— 给 xiaozhi-esp32-server 用的"播放英语课"插件。
 
 放在：main/xiaozhi-server/plugins_func/functions/play_lesson.py
 （与 play_music.py 同目录；如果你的版本用自动扫描注册，落盘即可，

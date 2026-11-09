@@ -43,3 +43,15 @@ desktop.ini
 
 # 演示残留
 demo_agent/
+
+# ===== 教材与跟读素材（实测 200MB / 1356 句，绝不入库）=====
+follow/
+data/
+raw.json
+loop_progress.json
+.progress.json
+
+# ===== 固件与刷机产物 =====
+*.bin
+firmware/
+build/
