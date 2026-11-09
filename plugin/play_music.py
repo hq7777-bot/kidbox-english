@@ -168,19 +168,85 @@ def _parse_file_ref(path):
     return book, unit, kind
 
 
+def _parse_powerup(text):
+    """解析 POWER UP 的点播说法 → (级别, 单元号, 类型)；不是 POWER UP 就返回 None。
+
+    "播放 power up 第一单元故事" / "power up 1 unit 3 song" / "剑桥一级第2单元歌曲"
+    / "播放P1-05"（编号也能吃）
+    """
+    s = (text or "").lower()
+    if not (re.search(r"power\s*up|powerup|剑桥", s) or re.search(r"\bp\s*0?([1-6])\b", s)):
+        return None
+
+    s2 = s.replace("powerup", "power up")
+    # 级别：power up 1 / p1 / 一级
+    level = 1
+    m = re.search(r"power\s*up\s*0*([1-6])", s2) or re.search(r"\bp\s*0*([1-6])\b", s2)
+    if m:
+        level = int(m.group(1))
+    else:
+        m = re.search(r"第\s*([一二三四五六])\s*级", s2)
+        if m:
+            level = _cn_to_int(m.group(1)) or 1
+
+    # 单元号：第3单元 / unit 3 / u3 / 第3课
+    unit = None
+    m = (re.search(r"\bu\s*0*(\d{1,2})\b", s2)
+         or re.search(r"unit\s*0*(\d{1,2})", s2)
+         or re.search(r"(?:第\s*)?(\d{1,2}|[一二三四五六七八九十]{1,3})\s*(?:单元|课)", s2))
+    if m:
+        unit = _cn_to_int(m.group(1))
+
+    # 类型
+    kind = None
+    if re.search(r"故事|story", s2):
+        kind = "Story"
+    elif re.search(r"歌曲|song|唱歌|儿歌", s2):
+        kind = "Song"
+    elif re.search(r"文学|literature|阅读", s2):
+        kind = "Literature"
+
+    return level, unit, kind
+
+
 def _find_best_match(potential_song, music_files):
     """查找最匹配的音频文件。
 
     改动（相对官方 v0.9.8，多次迭代后）：
     1. 忽略大小写；
-    2. 显式解析"书号-单元号-类型"（如 3-2 / U05 / Passage）做硬过滤：
+    2. **POWER UP 优先**：识别"power up 第一单元故事"这类说法，
+       否则会被当成 Smart Reading 的"第1单元"错配；
+    3. 显式解析"书号-单元号-类型"（如 3-2 / U05 / Passage）做硬过滤：
        否则 96 个教材音频里 "3-3 u16 passage" 会错配到 "3-1/U16-Passage"（书号被拆散后撞车）；
-    3. 没解析出结构信息时，退回按"词覆盖 + 相似度"排序（这样"播放 001""hello"仍能用）；
-    4. 完全相等直接返回。
+    4. 没解析出结构信息时，退回按"词覆盖 + 相似度"排序（这样"播放 001""hello"仍能用）；
+    5. 完全相等直接返回。
     """
     query = (potential_song or "").strip().lower()
     if not query:
         return None
+
+    # ---- POWER UP 编号优先（"P1-03" 这种直接命中文件序号） ----
+    m_code = re.search(r"\bp\s*0?([1-6])\s*[-_ ]\s*0*(\d{1,3})\b", query)
+    if m_code:
+        lvl, num = int(m_code.group(1)), int(m_code.group(2))
+        hit = [f for f in music_files
+               if re.search(rf"powerup{lvl}([/\\])", f.lower())
+               and re.search(rf"p{lvl}-0*{num}-", os.path.basename(f).lower())]
+        if hit:
+            return sorted(hit)[0]
+
+    # ---- POWER UP 自然语言（"power up 第一单元故事"） ----
+    pu = _parse_powerup(query)
+    if pu:
+        level, unit, kind = pu
+        cands = [f for f in music_files
+                 if re.search(rf"powerup{level}([/\\])", f.lower())]
+        if unit is not None:
+            cands = [f for f in cands if re.search(rf"u0*{unit}-", os.path.basename(f).lower())]
+        if kind:
+            cands = [f for f in cands if os.path.basename(f).lower().endswith(f"-{kind.lower()}.mp3")]
+        if cands:
+            return sorted(cands)[0]
 
     q_book, q_unit, q_kind = _parse_ref(query)
     structured = any((q_book, q_unit, q_kind))

@@ -101,7 +101,8 @@ python tools/powerup/trim_powerup.py         # 真生成
 ## 6. 待办
 
 - [ ] 接入设备熟听模式：`review_play` 目前写死 `SmartReading3` + 16 单元，需要支持"多书库 + 任意条数"
-- [ ] 若确认 `Vocabulary2-1` 不是你要的"歌曲"，改 `KINDS` 里的匹配串为 `sing the song` 重跑
+- [x] `Vocabulary2-1` 确认为歌曲轨，已按 `Song` 命名
+- [x] 点播支持自然说法：`播放 power up 第一单元故事`（play_music 里加了 `_parse_powerup`）
 
 ---
 
