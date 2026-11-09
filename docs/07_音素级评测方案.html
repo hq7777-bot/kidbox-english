@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>07_音素级评测方案</title><style>
+:root{--fg:#1a1a1a;--muted:#5f6b7a;--line:#e3e8ef;--accent:#c0392b;--accent2:#0f766e;
+--bg:#fbfcfd;--card:#fff;--warn:#fff8e6;--warnline:#f0c36d;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+.wrap{max-width:1000px;margin:0 auto;padding:48px 28px 96px;background:var(--card);
+box-shadow:0 0 0 1px var(--line);}
+h1{font-size:30px;line-height:1.35;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:22px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--line);}
+h3{font-size:17px;margin:26px 0 10px;color:var(--accent2)}
+p,li{color:#243040}
+blockquote{margin:16px 0;padding:12px 16px;background:var(--warn);border-left:4px solid var(--warnline);
+border-radius:0 6px 6px 0;color:#5a4a1f}
+blockquote p{margin:0;color:#5a4a1f}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;display:table}
+th,td{border:1px solid var(--line);padding:9px 11px;vertical-align:top;text-align:left}
+th{background:#f4f7fa;font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:#fafbfc}
+code{background:#f2f5f9;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+font:13.5px/1.5 "Cascadia Code",Consolas,monospace;color:#b03a2e}
+pre{background:#1f2430;color:#dfe6f3;padding:16px 18px;border-radius:8px;overflow:auto;
+font:13.5px/1.6 "Cascadia Code",Consolas,monospace;margin:16px 0}
+pre code{background:none;border:0;color:inherit;padding:0;font-size:13.5px}
+a{color:#0b6bcb;text-decoration:none;border-bottom:1px solid #bcd7f4}
+hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+ul,ol{padding-left:22px}
+li{margin:4px 0}
+.meta{color:var(--muted);font-size:14px;margin-bottom:26px}
+h2:first-of-type{margin-top:32px}
+@media print{body{background:#fff}.wrap{box-shadow:none;max-width:none;padding:0}
+h2{page-break-after:avoid}table{page-break-inside:avoid}}
+</style></head>
+<body><div class="wrap">
+<h1 id="_1">音素级评测：落地方案</h1>
+<blockquote>
+<p>结论：<strong>能做，不需要改固件。</strong> 难点不在调 API，而在三件事：
+① 拿到"孩子读这一句"的录音 ② 音频格式对齐 ③ 分数阈值按孩子校准。</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 为什么现在做不到（根因）</h2>
+<p>现在的跟读判定是：</p>
+<pre><code>设备录音 → 服务端 ASR（SenseVoice）→ 文本 → difflib 相似度
+</code></pre>
+<p><strong>文字已经丢了发音信息。</strong> 孩子把 <code>think</code> 读成 <code>sink</code>，ASR 直接给 <code>sink</code>，或者给 <code>think</code>（因为上下文），
+无论哪种，音素级信息都没了——只能在"音频"上评。</p>
+<p>所以要插一个新环节：</p>
+<pre><code>设备录音 → [新] 把这句 wav 存下来 → ASR 文本（不变）
+                                    ↓
+                          [新] 调评测 API（wav + 参考文本）
+                                    ↓
+                          音素级分数 → 决定通过/重读
+</code></pre>
+<hr />
+<h2 id="2">2. 第一步：拿到那句录音（关键，已确认可行）</h2>
+<p>服务端 ASR 基类里已经有现成设施（<code>core/providers/asr/base.py</code>）：</p>
+<pre><code class="language-python"># base.py:268
+async def speech_to_text_wrapper(self, pcm_data: List[bytes], session_id: str):
+    combined_pcm_data = b&quot;&quot;.join(pcm_data)     # ← 这一句的完整 PCM 就在这
+    ...
+    file_path = self.save_audio_to_file(pcm_data, session_id)  # ← 已有保存函数
+    ...
+    async def speech_to_text(self, pcm_data, session_id, artifacts)
+</code></pre>
+<p><code>artifacts</code> 里还带着 <code>pcm_frames</code> / <code>pcm_bytes</code> / <code>temp_path</code>。</p>
+<p><strong>做法：不改官方代码，新建一个 ASR provider 继承现有实现，只重写这一个方法</strong>：</p>
+<pre><code class="language-python"># 放 data/providers/asr/record_asr.py，在 .config.yaml 里 ASR 选它
+import shutil, time
+from pathlib import Path
+from core.providers.asr.fun_local import ASRProvider as FunASR   # 按实际类名改
+
+REC_DIR = Path(&quot;/opt/xiaozhi-esp32-server/data/records&quot;)
+
+class ASRProvider(FunASR):
+    async def speech_to_text_wrapper(self, pcm_data, session_id):
+        # 先落盘，再交给父类做识别（失败也不影响识别）
+        try:
+            REC_DIR.mkdir(parents=True, exist_ok=True)
+            path = self.save_audio_to_file(pcm_data, f&quot;rec_{int(time.time()*1000)}&quot;)
+            latest = REC_DIR / &quot;last.wav&quot;
+            shutil.copyfile(path, latest)
+        except Exception as e:
+            self.logger.bind(tag=&quot;REC&quot;).warning(f&quot;保存录音失败: {e}&quot;)
+        return await super().speech_to_text_wrapper(pcm_data, session_id)
+</code></pre>
+<p><strong>为什么用 <code>last.wav</code> 这个笨办法</strong>：跟读是"说完立刻判"，插件拿文本时那句录音就是最近一次——用固定文件名最简单，不用在 <code>conn</code> 上挂属性、不用改框架。并发多个设备时改成按 <code>device_id</code> 命名即可。</p>
+<p><strong>工作量</strong>：0.5 天｜<strong>验收</strong>：跟读一句后，<code>data/records/last.wav</code> 出现，能播放，内容就是刚说那句。</p>
+<blockquote>
+<p>若设备是半双工（播放时关麦），孩子跟读的那句照样能录到——因为那时 TTS 已经播完、设备处于聆听态。真正需要全双工的是"录音回放对比"，不是评测。</p>
+</blockquote>
+<hr />
+<h2 id="3-api">3. 第二步：选哪家评测 API</h2>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>音素级</th>
+<th>国内可用性</th>
+<th>免费额度</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Azure 语音 · Pronunciation Assessment</strong></td>
+<td>✅ 确定（<code>Granularity=Phoneme</code>）</td>
+<td>需国际版账号/信用卡；网络一般可达</td>
+<td><strong>F0：5 小时音频/月</strong>（≈4500 句）</td>
+<td>文档最规范，字段最全（accuracy/fluency/completeness/prosody + 词级 + 音素级）</td>
+</tr>
+<tr>
+<td><strong>讯飞语音评测 ISE</strong></td>
+<td>🟡 英文音素级通常需开通 <code>en_vip</code> 授权</td>
+<td>✅ 国内注册方便</td>
+<td>有试用包</td>
+<td>中文最强；英文句子评测好用，音素级要确认授权</td>
+</tr>
+<tr>
+<td>腾讯云 SOE</td>
+<td>🟡 单词/句子，音素视版本</td>
+<td>✅</td>
+<td>有试用</td>
+<td>备选</td>
+</tr>
+<tr>
+<td>本地 GOP（wav2vec2 + 强制对齐 + GOP 打分）</td>
+<td>✅ 理论可</td>
+<td>✅ 全离线</td>
+<td>免费</td>
+<td>效果明显不如商业 API，工作量大（1~2 周），<strong>不推荐现在做</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>建议顺序</strong>：先用 <strong>Azure F0</strong> 跑通（音素级是确定的，免费额度够用一年）；
+如果注册卡住，再试讯飞 ISE（先用官方 demo 音频验证返回里有没有 <code>phone</code> 字段，再决定投入）。</p>
+<blockquote>
+<p>⚠️ 我无法在这里替你验证账号/授权状态。下面给的字段名以官方文档为准，
+<strong>接的时候第一步永远是：拿官方 demo 音频跑通一次，看返回 JSON 里有没有音素节点。</strong></p>
+</blockquote>
+<hr />
+<h2 id="4-azure-rest-sdk">4. 第三步：调用（Azure REST，最省事，不用装 SDK）</h2>
+<pre><code class="language-python">import base64, json, requests
+
+def assess(wav_path: str, ref_text: str, key: str, region: str = &quot;eastasia&quot;):
+    cfg = {
+        &quot;ReferenceText&quot;: ref_text,
+        &quot;GradingSystem&quot;: &quot;HundredMark&quot;,
+        &quot;Granularity&quot;: &quot;Phoneme&quot;,      # ← 关键：音素级
+        &quot;EnableMiscue&quot;: True,          # 漏读/多读检测
+        &quot;PhonemeAlphabet&quot;: &quot;IPA&quot;,
+        &quot;Dimension&quot;: &quot;Comprehensive&quot;,
+    }
+    headers = {
+        &quot;Ocp-Apim-Subscription-Key&quot;: key,
+        &quot;Content-Type&quot;: &quot;audio/wav; codecs=audio/pcm; samplerate=16000&quot;,
+        &quot;Pronunciation-Assessment&quot;: base64.b64encode(
+            json.dumps(cfg).encode(&quot;utf-8&quot;)).decode(&quot;ascii&quot;),
+        &quot;Accept&quot;: &quot;application/json&quot;,
+    }
+    url = (f&quot;https://{region}.stt.speech.microsoft.com/speech/recognition/&quot;
+           f&quot;conversation/cognitiveservices/v1?language=en-US&quot;)
+    r = requests.post(url, headers=headers, data=open(wav_path, &quot;rb&quot;), timeout=15)
+    r.raise_for_status()
+    return r.json()[&quot;NBest&quot;][0]
+</code></pre>
+<p>返回结构（节选，字段以官方为准）：</p>
+<pre><code class="language-json">{
+  &quot;PronunciationAssessment&quot;: {&quot;AccuracyScore&quot;: 71, &quot;FluencyScore&quot;: 65, &quot;CompletenessScore&quot;: 100},
+  &quot;Words&quot;: [
+    {&quot;Word&quot;: &quot;look&quot;, &quot;PronunciationAssessment&quot;: {&quot;AccuracyScore&quot;: 92, &quot;ErrorType&quot;: &quot;None&quot;},
+     &quot;Phonemes&quot;: [{&quot;Phoneme&quot;: &quot;l&quot;, &quot;PronunciationAssessment&quot;: {&quot;AccuracyScore&quot;: 95}},
+                  {&quot;Phoneme&quot;: &quot;ʊ&quot;, &quot;PronunciationAssessment&quot;: {&quot;AccuracyScore&quot;: 90}}]},
+    {&quot;Word&quot;: &quot;cat&quot;, &quot;PronunciationAssessment&quot;: {&quot;AccuracyScore&quot;: 41, &quot;ErrorType&quot;: &quot;Mispronunciation&quot;},
+     &quot;Phonemes&quot;: [{&quot;Phoneme&quot;: &quot;k&quot;, &quot;PronunciationAssessment&quot;: {&quot;AccuracyScore&quot;: 30}},
+                  {&quot;Phoneme&quot;: &quot;æ&quot;, &quot;PronunciationAssessment&quot;: {&quot;AccuracyScore&quot;: 45}}]}
+  ]
+}
+</code></pre>
+<p><strong>音频要求</strong>：16kHz / 16bit / 单声道 PCM WAV。
+设备是 24kHz Opus，<code>last.wav</code> 如果是 24k，先用 ffmpeg 转一次：</p>
+<pre><code class="language-bash">ffmpeg -y -i last.wav -ar 16000 -ac 1 -c:a pcm_s16le last16k.wav
+</code></pre>
+<blockquote>
+<p>这一步别省。采样率不对，评测分会莫名其妙偏低，很难排查。</p>
+</blockquote>
+<hr />
+<h2 id="5">5. 第四步：接进跟读流程</h2>
+<p>改 <code>plugin/follow_reading.py</code> 的判定函数，其他逻辑不动：</p>
+<pre><code class="language-python">def judge(said_text, target_text, wav_path):
+    # 1) 优先音素级评测
+    try:
+        r = assess(wav_path, target_text, KEY)
+        total = r[&quot;PronunciationAssessment&quot;][&quot;AccuracyScore&quot;]
+        bad = [w for w in r[&quot;Words&quot;]
+               if w[&quot;PronunciationAssessment&quot;][&quot;AccuracyScore&quot;] &lt; 60]
+        return {&quot;ok&quot;: total &gt;= 60, &quot;score&quot;: total, &quot;bad_words&quot;: bad, &quot;source&quot;: &quot;api&quot;}
+    except Exception:
+        pass
+    # 2) 降级：原来的文本相似度（API 挂了也能继续上课）
+    from difflib import SequenceMatcher
+    s = SequenceMatcher(None, norm(said_text), norm(target_text)).ratio()
+    return {&quot;ok&quot;: s &gt;= 0.6, &quot;score&quot;: s * 100, &quot;bad_words&quot;: [], &quot;source&quot;: &quot;fallback&quot;}
+</code></pre>
+<p><strong>反馈话术</strong>（关键，决定孩子爱不爱用）：</p>
+<table>
+<thead>
+<tr>
+<th>评测结果</th>
+<th>说什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>总分 ≥ 80</td>
+<td>「很好！」→ 下一句</td>
+</tr>
+<tr>
+<td>60~79，某个词低分</td>
+<td>「<code>cat</code> 再读一次」→ 重播该句</td>
+</tr>
+<tr>
+<td>&lt; 60</td>
+<td>「跟着我读：look at the cat」→ 重播 + 慢速版本</td>
+</tr>
+<tr>
+<td>连续 2 次不达标</td>
+<td>「下一个」→ 跳过（<strong>别让孩子卡死在一句上</strong>）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>音素 → 中文提示</strong>（做 15~20 条常用映射就够）：</p>
+<table>
+<thead>
+<tr>
+<th>音素</th>
+<th>孩子常错成</th>
+<th>提示</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>/θ/</td>
+<td>s / f</td>
+<td>「舌尖轻轻放在牙齿中间，别读成 s」</td>
+</tr>
+<tr>
+<td>/ð/</td>
+<td>z / d</td>
+<td>「舌尖轻咬，振动，不是 z」</td>
+</tr>
+<tr>
+<td>/r/</td>
+<td>l</td>
+<td>「舌头卷起来，不要碰牙齿」</td>
+</tr>
+<tr>
+<td>/v/</td>
+<td>w</td>
+<td>「上牙轻咬下唇」</td>
+</tr>
+<tr>
+<td>/æ/</td>
+<td>e</td>
+<td>「嘴张大一点，像说“啊”」</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6">6. 第五步：阈值校准（这步最容易被忽略）</h2>
+<p>商业 API 的及格线是按成人/考试定的，<strong>一年级孩子会普遍偏低</strong>，直接用 60 分会让孩子一直"不及格"。</p>
+<p>做法：</p>
+<ol>
+<li>先记录孩子的基线：让他读 20 句熟悉的，看平均分（假设 62）；</li>
+<li>把通过线设成 <strong>基线 − 5</strong>（57），随能力提升每周上调 2 分；</li>
+<li>只对"明显低于基线"的句子提示，不做绝对分数播报（<strong>不要念分数给孩子听</strong>）；</li>
+<li>分数存进日志，家长周报里看趋势。</li>
+</ol>
+<hr />
+<h2 id="7">7. 成本与延迟</h2>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>数值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>每句额外延迟</td>
+<td>0.6~1.5 s（Azure 亚洲区实测通常 &lt;1s）</td>
+</tr>
+<tr>
+<td>每天句数</td>
+<td>30~60 句</td>
+</tr>
+<tr>
+<td>月句数</td>
+<td>~1500 句 ≈ 1.7 小时音频</td>
+</tr>
+<tr>
+<td>Azure F0 免费额度</td>
+<td>5 小时/月 → <strong>免费够用</strong></td>
+</tr>
+<tr>
+<td>超出后</td>
+<td>按音频时长计费，量级仍是每月几块钱</td>
+</tr>
+</tbody>
+</table>
+<p><strong>延迟对策</strong>：评测可以和"说鼓励语"并行——先播「嗯」，再出分。孩子感知不到等待。</p>
+<hr />
+<h2 id="8">8. 隐私（必须提前想清楚）</h2>
+<p>孩子的录音要上传到微软/讯飞。三个选项：</p>
+<table>
+<thead>
+<tr>
+<th>选项</th>
+<th>隐私</th>
+<th>效果</th>
+<th>建议</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>用商业 API</td>
+<td>录音出第三方</td>
+<td>好</td>
+<td>告知家人，只传单句、不存云端</td>
+</tr>
+<tr>
+<td>只传"评分请求"，本地不存录音</td>
+<td>中</td>
+<td>好</td>
+<td>设 <code>KEEP_RECORD=false</code>，评完即删</td>
+</tr>
+<tr>
+<td>本地 GOP</td>
+<td>好</td>
+<td>一般</td>
+<td>暂不做</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9">9. 交付拆解</h2>
+<table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>内容</th>
+<th>工作量</th>
+<th>验收</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>ASR 层落盘 <code>last.wav</code> + 转 16k</td>
+<td>0.5 天</td>
+<td>文件存在、能播、内容对</td>
+</tr>
+<tr>
+<td>2</td>
+<td>用官方 demo 音频跑通评测 API</td>
+<td>0.5 天</td>
+<td>返回里有 <code>Phonemes</code> 节点</td>
+</tr>
+<tr>
+<td>3</td>
+<td>接进 <code>follow_reading</code>，带降级</td>
+<td>1 天</td>
+<td>读错一个词，能指出是哪个词</td>
+</tr>
+<tr>
+<td>4</td>
+<td>音素提示映射 + 话术</td>
+<td>0.5 天</td>
+<td>孩子听得懂"舌尖轻咬"这类提示</td>
+</tr>
+<tr>
+<td>5</td>
+<td>阈值校准（用真实录音）</td>
+<td>0.5 天</td>
+<td>20 句里通过率落在 60~80%（既不被打击，也不放水）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>总计 3 天左右。</strong> 第 2 步是唯一的"外部依赖风险"——如果 Azure 注册不通、讯飞又不给音素级，整个方案就要退到本地 GOP（另算 1~2 周）。</p>
+</div></body></html>
