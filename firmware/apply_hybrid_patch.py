@@ -164,37 +164,58 @@ def write_raw(p: Path, text: str):
         f.write(text)
 
 
+def _nl_of(t: str) -> str:
+    """文件本身的换行风格"""
+    return "\r\n" if "\r\n" in t else "\n"
+
+
+def _to_lf(t: str) -> str:
+    return t.replace("\r\n", "\n")
+
+
+def _from_lf(t: str, nl: str) -> str:
+    return t if nl == "\n" else t.replace("\n", nl)
+
+
 def patch_text(p: Path, pairs, check_only):
-    """pairs: [(旧串, 新串, 说明)]，每条都必须恰好出现一次"""
+    """pairs: [(旧串, 新串, 说明)]，每条都必须恰好出现一次
+
+    锚点一律按 LF 写，这里把文件统一成 LF 再匹配，写回时还原原换行风格
+    （Windows 检出是 CRLF，不这么做锚点 100% 匹配不上）。
+    """
     t = read_raw(p)
-    if MARK in t:
+    nl = _nl_of(t)
+    tf = _to_lf(t)
+    if MARK in tf:
         print(f"  [跳过] {p.name} 已经打过补丁")
         return False
     for old, new, note in pairs:
-        n = t.count(old)
+        n = tf.count(old)
         if n != 1:
             die(f"{p} 里找不到唯一锚点（{note}），出现 {n} 次。\n"
                 f"你的仓库版本可能和我核对的不一致，请把这段发我：\n{old[:200]}")
-        t = t.replace(old, new, 1)
+        tf = tf.replace(old, new, 1)
     if not check_only:
         backup(p)
-        write_raw(p, t)
-    print(f"  [{'检查通过' if check_only else '已修改'}] {p}")
+        write_raw(p, _from_lf(tf, nl))
+    print(f"  [{'检查通过' if check_only else '已修改'}] {p}（换行 {nl!r}，匹配 LF 锚点）")
     return True
 
 
 def patch_feed(p: Path, check_only):
     t = read_raw(p)
-    if MARK in t:
+    nl = _nl_of(t)
+    tf = _to_lf(t)
+    if MARK in tf:
         print(f"  [跳过] {p.name} 的 FeedSamples 已打过补丁")
         return
-    i = t.find(FEED_START)
-    j = t.find(FEED_END)
+    i = tf.find(FEED_START)
+    j = tf.find(FEED_END)
     if i < 0 or j < 0 or j <= i:
         die(f"{p} 里找不到 FeedSamples / GetFeedSize 的边界")
-    t = t[:i] + FEED_NEW + t[j:]
+    tf = tf[:i] + FEED_NEW + tf[j:]
     if not check_only:
-        write_raw(p, t)
+        write_raw(p, _from_lf(tf, nl))
 
 
 def build_profile_text(indent: str, nl: str) -> str:
@@ -239,12 +260,49 @@ def patch_config_json(p: Path, check_only):
     print(f"  [{'检查通过' if check_only else '已添加'}] config.json → {BUILD_PROFILE['name']}")
 
 
+def _set_entry(prefix: str, value: str):
+    """替换 BUILD_PROFILE 里以 prefix= 开头的项（保留其它项）"""
+    for i, opt in enumerate(BUILD_PROFILE["sdkconfig_append"]):
+        if opt.startswith(prefix + "="):
+            BUILD_PROFILE["sdkconfig_append"][i] = f"{prefix}={value}"
+            return True
+    BUILD_PROFILE["sdkconfig_append"].append(f"{prefix}={value}")
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("repo", help="xiaozhi-esp32 仓库根目录")
     ap.add_argument("--check", action="store_true", help="只检查，不写文件")
     ap.add_argument("--revert", action="store_true", help="从 .bak 恢复")
+    # ---- 唤醒词可配（不同设备不同名字）----
+    ap.add_argument("--profile", help="build profile 名，默认 esp-vocat-hybrid-text")
+    ap.add_argument("--aliases", help='MultiNet 拼音别名，如 "ni hao xin xin|xin xin tong xue"')
+    ap.add_argument("--display", help='MultiNet 显示词，如 "你好心心|心心同学"')
+    ap.add_argument("--primary", help='WakeNet 主词显示名，如 "你好小鑫"；传 "" 关闭并联快路径')
+    ap.add_argument("--wn-model", help="WakeNet 模型配置项，如 CONFIG_SR_WN_WN9_NIHAOXIAOXIN_TTS")
     a = ap.parse_args()
+
+    if a.profile:
+        BUILD_PROFILE["name"] = a.profile
+    if a.aliases is not None:
+        _set_entry("CONFIG_CUSTOM_WAKE_WORD", json.dumps(a.aliases, ensure_ascii=False))
+    if a.display is not None:
+        _set_entry("CONFIG_CUSTOM_WAKE_WORD_DISPLAY", json.dumps(a.display, ensure_ascii=False))
+    if a.primary is not None:
+        _set_entry("CONFIG_CUSTOM_WAKE_WORD_PRIMARY_DISPLAY", json.dumps(a.primary, ensure_ascii=False))
+        if not a.primary:  # 关闭并联：不需要 WakeNet 模型，省 PSRAM/CPU
+            BUILD_PROFILE["sdkconfig_append"] = [
+                o for o in BUILD_PROFILE["sdkconfig_append"]
+                if not o.startswith("CONFIG_SR_WN_WN9_")
+            ]
+    if a.wn_model:
+        for i, opt in enumerate(BUILD_PROFILE["sdkconfig_append"]):
+            if opt.startswith("CONFIG_SR_WN_WN9_"):
+                BUILD_PROFILE["sdkconfig_append"][i] = f"{a.wn_model}=y"
+                break
+        else:
+            BUILD_PROFILE["sdkconfig_append"].append(f"{a.wn_model}=y")
 
     root = Path(a.repo).resolve()
     if not (root / "main" / "audio").is_dir():

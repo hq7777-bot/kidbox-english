@@ -1,0 +1,57 @@
+diff --git a/scripts/build_default_assets.py b/scripts/build_default_assets.py
+index 0bd5027..8d938eb 100755
+--- a/scripts/build_default_assets.py
++++ b/scripts/build_default_assets.py
+@@ -1008,9 +1008,23 @@ def main():
+     # Apply wake word logic to decide which models to package
+     wakenet_model_paths = []
+     multinet_model_paths = []
+-    
+-    # 1. Only package wakenet models if USE_ESP_WAKE_WORD=y or USE_AFE_WAKE_WORD=y
+-    if wake_word_config['use_esp_wake_word'] or wake_word_config['use_afe_wake_word']:
++
++    # 0. 并联模式：CUSTOM_WAKE_WORD_PRIMARY_DISPLAY 非空时，MultiNet 之外还要一个 WakeNet 主词模型。
++    #    原脚本只在 USE_ESP/AFE_WAKE_WORD 时打包 WakeNet，会让并联模式拿不到模型（静默退化为纯 MultiNet）。
++    def _primary_display(path):
++        try:
++            with io.open(path, "r", encoding="utf-8") as f:
++                for line in f:
++                    if line.startswith("CONFIG_CUSTOM_WAKE_WORD_PRIMARY_DISPLAY="):
++                        return line.split("=", 1)[1].strip().strip('"')
++        except Exception:
++            pass
++        return ""
++
++    hybrid_wakenet = bool(_primary_display(args.sdkconfig))
++
++    # 1. Package wakenet models if USE_ESP_WAKE_WORD=y, USE_AFE_WAKE_WORD=y, or hybrid (custom+WakeNet)
++    if wake_word_config['use_esp_wake_word'] or wake_word_config['use_afe_wake_word'] or hybrid_wakenet:
+         wakenet_model_paths = get_wakenet_model_paths(wakenet_model_names, args.esp_sr_model_path)
+         if not wakenet_model_names or len(wakenet_model_paths) != len(wakenet_model_names):
+             parser.error("Wake-word detection requires selected, available ESP-SR WakeNet models")
+@@ -1063,17 +1077,18 @@ def main():
+         language = get_language_from_multinet_models(multinet_model_names)
+         
+         # Build multinet_model info structure
++        # 支持多个唤醒词：CONFIG_CUSTOM_WAKE_WORD 用 '|' 分隔，DISPLAY 同序对应
++        _words = [w.strip() for w in str(custom_wake_word_config['wake_word']).split('|') if w.strip()]
++        _displays = [d.strip() for d in str(custom_wake_word_config.get('display', '')).split('|')]
++        _commands = []
++        for _i, _w in enumerate(_words):
++            _text = _displays[_i] if _i < len(_displays) and _displays[_i] else _w
++            _commands.append({"command": _w, "text": _text, "action": "wake"})
+         multinet_model_info = {
+             "language": language,
+             "duration": 3000,  # Default duration in ms
+             "threshold": custom_wake_word_config['threshold'],
+-            "commands": [
+-                {
+-                    "command": custom_wake_word_config['wake_word'],
+-                    "text": custom_wake_word_config['display'],
+-                    "action": "wake"
+-                }
+-            ]
++            "commands": _commands,
+         }
+         print(f"  custom wake word: {custom_wake_word_config['wake_word']} ({custom_wake_word_config['display']})")
+         print(f"  wake word language: {language}")
