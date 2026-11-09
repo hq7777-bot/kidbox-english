@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>10_双唤醒与文字界面_实施方案</title><style>
+:root{--fg:#1a1a1a;--muted:#5f6b7a;--line:#e3e8ef;--accent:#c0392b;--accent2:#0f766e;
+--bg:#fbfcfd;--card:#fff;--warn:#fff8e6;--warnline:#f0c36d;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+.wrap{max-width:1000px;margin:0 auto;padding:48px 28px 96px;background:var(--card);
+box-shadow:0 0 0 1px var(--line);}
+h1{font-size:30px;line-height:1.35;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:22px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--line);}
+h3{font-size:17px;margin:26px 0 10px;color:var(--accent2)}
+p,li{color:#243040}
+blockquote{margin:16px 0;padding:12px 16px;background:var(--warn);border-left:4px solid var(--warnline);
+border-radius:0 6px 6px 0;color:#5a4a1f}
+blockquote p{margin:0;color:#5a4a1f}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;display:table}
+th,td{border:1px solid var(--line);padding:9px 11px;vertical-align:top;text-align:left}
+th{background:#f4f7fa;font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:#fafbfc}
+code{background:#f2f5f9;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+font:13.5px/1.5 "Cascadia Code",Consolas,monospace;color:#b03a2e}
+pre{background:#1f2430;color:#dfe6f3;padding:16px 18px;border-radius:8px;overflow:auto;
+font:13.5px/1.6 "Cascadia Code",Consolas,monospace;margin:16px 0}
+pre code{background:none;border:0;color:inherit;padding:0;font-size:13.5px}
+a{color:#0b6bcb;text-decoration:none;border-bottom:1px solid #bcd7f4}
+hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+ul,ol{padding-left:22px}
+li{margin:4px 0}
+.meta{color:var(--muted);font-size:14px;margin-bottom:26px}
+h2:first-of-type{margin-top:32px}
+@media print{body{background:#fff}.wrap{box-shadow:none;max-width:none;padding:0}
+h2{page-break-after:avoid}table{page-break-inside:avoid}}
+</style></head>
+<body><div class="wrap">
+<h1 id="_1">双唤醒 + 纯文字界面：实施方案</h1>
+<blockquote>
+<p>对应需求：
+1. WakeNet（你好小鑫）+ MultiNet（嗨小鑫 / 小鑫同学 / 哈喽小鑫）<strong>并联</strong>，去重不重复唤醒
+2. 关掉 emote（猫脸），屏幕显示<strong>纯文字</strong>，并能看出<strong>谁说的</strong></p>
+</blockquote>
+<hr />
+<h2 id="1">1. 改了什么</h2>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>改动</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>main/Kconfig.projbuild</code></td>
+<td>新增 <code>CUSTOM_WAKE_WORD_PRIMARY_DISPLAY</code>（并联的 WakeNet 主词，默认"你好小鑫"）</td>
+</tr>
+<tr>
+<td><code>main/audio/wake_words/custom_wake_word.h</code></td>
+<td>加 WakeNet 接口/模型/缓冲区/去重时间戳</td>
+</tr>
+<tr>
+<td><code>main/audio/wake_words/custom_wake_word.cc</code></td>
+<td><code>InitWakenet()</code> + <code>TryEmitWake()</code> + <code>FeedSamples()</code> 重写（同时喂两个模型）</td>
+</tr>
+<tr>
+<td><code>main/boards/espressif/esp-vocat/config.json</code></td>
+<td>新增 build profile <code>esp-vocat-hybrid-text</code></td>
+</tr>
+</tbody>
+</table>
+<p>补丁用脚本打，不手改（脚本会逐条校验锚点，对不上就报错退出，不会写坏文件）：</p>
+<pre><code class="language-bash">cd D:\xiaozhi-esp32                       # 你的固件仓库
+python &lt;repo&gt;\firmware\apply_hybrid_patch.py --check .    # 先看能不能打
+python &lt;repo&gt;\firmware\apply_hybrid_patch.py .            # 真打（每文件留 .bak）
+</code></pre>
+<hr />
+<h2 id="2">2. 唤醒为什么这样设计</h2>
+<h3 id="21">2.1 两条路径并联</h3>
+<pre><code>麦克风 → AFE（降噪/AEC）→ 同一份单声道数据
+                            ├─▶ WakeNet（你好小鑫）  ~200ms  ─┐
+                            └─▶ MultiNet（3 个别名） ~600ms  ─┤
+                                                              ▼
+                                                    去重窗口 1.2s → 触发唤醒
+</code></pre>
+<ul>
+<li><strong>WakeNet 命中就立刻返回</strong>，这一轮不再喂 MultiNet——同一句话不会二次触发；</li>
+<li>即使下一轮 MultiNet 又命中（尾音"同学"还在缓冲里），<strong>1.2 秒去重窗</strong>会把它扔掉；</li>
+<li><code>running_</code> 在触发瞬间置 false，上层 <code>EnableWakeWordDetection</code> 重新开启前不会继续检测。</li>
+</ul>
+<h3 id="22">2.2 代码里三个关键点</h3>
+<pre><code class="language-cpp">// ① 唤醒前先缓存音频（否则 WakeNet 命中时&quot;喊的那句&quot;没进缓存，服务器收不到）
+wake_word_audio_cache_.Store(mono_buf.data(), mono_buf.size());
+
+// ② WakeNet 命中 → 立即唤醒并 return
+if (r &gt; 0) { TryEmitWake(primary_word_); return; }
+
+// ③ 去重
+if (last_wake_us_ != 0 &amp;&amp; (now - last_wake_us_) &lt; 1200 * 1000) return;
+</code></pre>
+<h3 id="23">2.3 代价（要提前接受）</h3>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>内存</td>
+<td>多一个 WakeNet9 模型（约 100~200KB，吃 PSRAM）</td>
+</tr>
+<tr>
+<td>CPU</td>
+<td>两套推理并行，约 +15~25%（已同时打开 240MHz）</td>
+</tr>
+<tr>
+<td>误唤醒</td>
+<td>WakeNet 这条路径对"你好小鑫"更敏感；MultiNet 阈值 15 仍偏低，若误唤醒多就调到 25</td>
+</tr>
+<tr>
+<td>别名仍慢</td>
+<td>说"嗨小鑫"依旧走 MultiNet（~600ms）——这是 MultiNet 的固有延迟</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3">3. 界面为什么这样设计</h2>
+<table>
+<thead>
+<tr>
+<th>配置</th>
+<th>效果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CONFIG_USE_EMOTE_MESSAGE_STYLE=n</code></td>
+<td>不再用猫脸 <code>EmoteDisplay</code></td>
+</tr>
+<tr>
+<td><code>CONFIG_USE_WECHAT_MESSAGE_STYLE=y</code></td>
+<td>用<strong>气泡聊天</strong>布局：用户消息右对齐+绿色，助手消息左对齐+灰色</td>
+</tr>
+<tr>
+<td><code>CONFIG_USE_MULTILINE_CHAT_MESSAGE=y</code></td>
+<td>长句换行显示，不再横向滚动</td>
+</tr>
+<tr>
+<td><code>CONFIG_FLASH_EXPRESSION_ASSETS=n</code></td>
+<td>不再烧表情资源（省 flash）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>"谁说的"由气泡左右位置 + 颜色区分</strong>，这是固件里现成的能力（<code>lcd_display.cc:649-680</code>），不用自己写判断。</p>
+<p>跟读时服务端 <code>store_tts_text(sentence_id, 句子原文)</code> → 固件 <code>SetChatMessage("assistant", 句子)</code> → 屏幕显示这句英文。<strong>服务端零改动。</strong></p>
+<blockquote>
+<p>如果圆屏上气泡太挤（1.85 寸），可以再关掉 <code>USE_MULTILINE_CHAT_MESSAGE</code>，退化成单行滚动。</p>
+</blockquote>
+<hr />
+<h2 id="4">4. 编译与烧录</h2>
+<pre><code class="language-bash"># 1) 编译（board 是位置参数，--name 对应 config.json 里的 build.name）
+python scripts/build.py espressif/esp-vocat --name esp-vocat-hybrid-text
+
+# 2) 只刷 app + assets，保住 WiFi 凭据（别刷整片 0x0）
+py -3.13 -m esptool --chip esp32s3 -p COM3 -b 460800 write-flash ^
+   0x20000 build/xiaozhi.bin 0x800000 build/configured_assets.bin
+</code></pre>
+<hr />
+<h2 id="5">5. 验收</h2>
+<h3 id="51">5.1 串口日志（开机应出现）</h3>
+<pre><code>I (xxx) CustomWakeWord: 并联 WakeNet 已启用: model=wn9_nihaoxiaoxin_tts word=你好小鑫 chunk=512
+</code></pre>
+<p>如果看到：</p>
+<table>
+<thead>
+<tr>
+<th>日志</th>
+<th>含义</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>assets 里没有 WakeNet 模型</code></td>
+<td>编译时没带上 wn9 模型</td>
+<td>确认 profile 里有 <code>CONFIG_SR_WN_WN9_NIHAOXIAOXIN_TTS=y</code></td>
+</tr>
+<tr>
+<td><code>拿不到 WakeNet 接口</code></td>
+<td>esp-sr 版本没有这个模型</td>
+<td>换 <code>--list-wake-words</code> 里有的词</td>
+</tr>
+<tr>
+<td><code>退化为纯 MultiNet</code></td>
+<td>同上</td>
+<td>功能仍可用，只是没有快路径</td>
+</tr>
+</tbody>
+</table>
+<h3 id="52">5.2 行为验收</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>操作</th>
+<th>期望</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>说"你好小鑫"</td>
+<td><strong>≤300ms</strong> 有反应（屏幕切换/提示音）</td>
+</tr>
+<tr>
+<td>2</td>
+<td>说"嗨小鑫""小鑫同学""哈喽小鑫"</td>
+<td>能唤醒，但明显慢一点（~600ms）</td>
+</tr>
+<tr>
+<td>3</td>
+<td>连续说"你好小鑫"两次（间隔 &lt;1s）</td>
+<td><strong>只唤醒一次</strong></td>
+</tr>
+<tr>
+<td>4</td>
+<td>说完"你好小鑫同学"（连读）</td>
+<td>只唤醒一次</td>
+</tr>
+<tr>
+<td>5</td>
+<td>唤醒对话</td>
+<td>屏幕：你说的话在右（绿），小鑫的话在左（灰）</td>
+</tr>
+<tr>
+<td>6</td>
+<td>跟读一句</td>
+<td>屏幕显示这句英文</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6">6. 回滚</h2>
+<pre><code class="language-bash">python &lt;repo&gt;\firmware\apply_hybrid_patch.py --revert D:\xiaozhi-esp32
+</code></pre>
+<p>或者直接刷回旧 profile：</p>
+<pre><code class="language-bash">python scripts/build.py espressif/esp-vocat --name esp-vocat-xinxin
+</code></pre>
+<p>旧的 <code>esp-vocat</code> 和 <code>esp-vocat-xinxin</code> 两个档都还在，随时能编回去。</p>
+<hr />
+<h2 id="7">7. 已知风险（诚实说明）</h2>
+<table>
+<thead>
+<tr>
+<th>风险</th>
+<th>说明</th>
+<th>应对</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>没编译过</strong></td>
+<td>我这里没有 ESP-IDF 工具链，代码是<strong>对照源码写的</strong>，只验证了"能正确插入、锚点匹配、括号平衡"</td>
+<td>第一次编译大概率有 1~3 处小错，把报错贴回来，我按行改</td>
+</tr>
+<tr>
+<td><code>FLASH_EXPRESSION_ASSETS=n</code></td>
+<td>若 CMake 仍在找表情资源会报错</td>
+<td>改回 <code>=y</code> 即可（只是多占 flash）</td>
+</tr>
+<tr>
+<td>圆屏排版</td>
+<td>WeChat 气泡在 360×360 圆屏上可能挤</td>
+<td>关 <code>USE_MULTILINE_CHAT_MESSAGE</code> 或调字号</td>
+</tr>
+<tr>
+<td>双模型内存</td>
+<td>S3 上是 PSRAM 大户</td>
+<td>若 <code>create()</code> 返回 null，日志会提示，功能退化为纯 MultiNet</td>
+</tr>
+<tr>
+<td><code>CONFIG_SR_WN_WN9_NIHAOXIAOXIN_TTS</code> 符号不存在</td>
+<td>esp-sr 版本不同</td>
+<td>用 <code>--list-wake-words</code> 确认实际模型名，改 profile 里那一行</td>
+</tr>
+</tbody>
+</table>
+</div></body></html>
