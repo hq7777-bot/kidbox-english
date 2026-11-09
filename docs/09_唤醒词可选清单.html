@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>09_唤醒词可选清单</title><style>
+:root{--fg:#1a1a1a;--muted:#5f6b7a;--line:#e3e8ef;--accent:#c0392b;--accent2:#0f766e;
+--bg:#fbfcfd;--card:#fff;--warn:#fff8e6;--warnline:#f0c36d;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.75 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+.wrap{max-width:1000px;margin:0 auto;padding:48px 28px 96px;background:var(--card);
+box-shadow:0 0 0 1px var(--line);}
+h1{font-size:30px;line-height:1.35;margin:0 0 6px;letter-spacing:-.3px}
+h2{font-size:22px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--line);}
+h3{font-size:17px;margin:26px 0 10px;color:var(--accent2)}
+p,li{color:#243040}
+blockquote{margin:16px 0;padding:12px 16px;background:var(--warn);border-left:4px solid var(--warnline);
+border-radius:0 6px 6px 0;color:#5a4a1f}
+blockquote p{margin:0;color:#5a4a1f}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;display:table}
+th,td{border:1px solid var(--line);padding:9px 11px;vertical-align:top;text-align:left}
+th{background:#f4f7fa;font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:#fafbfc}
+code{background:#f2f5f9;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+font:13.5px/1.5 "Cascadia Code",Consolas,monospace;color:#b03a2e}
+pre{background:#1f2430;color:#dfe6f3;padding:16px 18px;border-radius:8px;overflow:auto;
+font:13.5px/1.6 "Cascadia Code",Consolas,monospace;margin:16px 0}
+pre code{background:none;border:0;color:inherit;padding:0;font-size:13.5px}
+a{color:#0b6bcb;text-decoration:none;border-bottom:1px solid #bcd7f4}
+hr{border:0;border-top:1px solid var(--line);margin:34px 0}
+ul,ol{padding-left:22px}
+li{margin:4px 0}
+.meta{color:var(--muted);font-size:14px;margin-bottom:26px}
+h2:first-of-type{margin-top:32px}
+@media print{body{background:#fff}.wrap{box-shadow:none;max-width:none;padding:0}
+h2{page-break-after:avoid}table{page-break-inside:avoid}}
+</style></head>
+<body><div class="wrap">
+<h1 id="esp32-s3-vocat">唤醒词可选清单（ESP32-S3 / VoCat）</h1>
+<blockquote>
+<p>数据来源：<code>espressif/esp-sr</code> 的 <code>Kconfig.projbuild</code>（87 个 WakeNet 模型，其中 46 个中文）。
+<strong>以你本地实际为准</strong>：在固件目录跑 <code>python scripts/build.py --list-wake-words</code> 打印的就是你这份 esp-sr 支持的全集。</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 先搞清楚：两个开关不是"两套唤醒词"</h2>
+<table>
+<thead>
+<tr>
+<th>Kconfig</th>
+<th>实际是什么</th>
+<th>在 VoCat（ESP32-S3）能用吗</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>USE_AFE_WAKE_WORD</code></td>
+<td>WakeNet <strong>+ AFE</strong>（降噪/AEC/VAD）</td>
+<td>✅ <strong>能用</strong>，S3 走这条</td>
+</tr>
+<tr>
+<td><code>USE_ESP_WAKE_WORD</code></td>
+<td>WakeNet <strong>不带 AFE</strong>（轻量版）</td>
+<td>❌ <strong>不能用</strong>，只给 esp32 / C3 / C5 / C6</td>
+</tr>
+<tr>
+<td><code>USE_CUSTOM_WAKE_WORD</code></td>
+<td><strong>MultiNet</strong>（命令词识别，可自定义任意词）</td>
+<td>✅ 能用，但慢</td>
+</tr>
+</tbody>
+</table>
+<p>依据（<code>scripts/build.py</code>）：</p>
+<pre><code class="language-python">_AFE_WAKE_WORD_TARGETS = {&quot;esp32s3&quot;, &quot;esp32p4&quot;, &quot;esp32s31&quot;}
+_ESP_WAKE_WORD_TARGETS = {&quot;esp32&quot;, &quot;esp32c3&quot;, &quot;esp32c5&quot;, &quot;esp32c6&quot;}
+</code></pre>
+<p><strong>结论：这两个选项用的是同一批 WakeNet 模型，区别只在"音频要不要先过 AFE"。</strong>
+而你手上这台 S3 只能用 <code>USE_AFE_WAKE_WORD</code>。</p>
+<p>唤醒词具体是哪个，由 <code>CONFIG_SR_WN_*</code>（选了哪个模型）决定，不是由这两个开关决定。</p>
+<p>不指定时，S3 的默认模型是 <code>wn9_nihaoxiaozhi_tts</code>（"你好小智"）。</p>
+<hr />
+<h2 id="2-46-s3">2. 中文唤醒词全表（46 个，S3 可用）</h2>
+<table>
+<thead>
+<tr>
+<th>模型 ID</th>
+<th>唤醒词</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wn9_nihaoxiaozhi_tts</code></td>
+<td>你好小智（<strong>默认</strong>）</td>
+</tr>
+<tr>
+<td><code>wn9_nihaomiaoban_tts2</code></td>
+<td>你好喵伴（<strong>VoCat 原厂</strong>）</td>
+</tr>
+<tr>
+<td><code>wn9_nihaoxiaoxin_tts</code></td>
+<td><strong>你好小鑫</strong> ← 发音最接近"你好心心"</td>
+</tr>
+<tr>
+<td><code>wn9_xiaolongxiaolong_tts</code></td>
+<td>小龙小龙</td>
+</tr>
+<tr>
+<td><code>wn9_xiaoluxiaolu_tts2</code></td>
+<td>小鹿小鹿</td>
+</tr>
+<tr>
+<td><code>wn9_xiaoyaxiaoya_tts2</code></td>
+<td>小鸭小鸭</td>
+</tr>
+<tr>
+<td><code>wn9_xiaobinxiaobin_tts</code></td>
+<td>小滨小滨 / 小冰小冰</td>
+</tr>
+<tr>
+<td><code>wn9_xiaojianxiaojian_tts2</code></td>
+<td>小箭小箭</td>
+</tr>
+<tr>
+<td><code>wn9_xiaotexiaote_tts2</code></td>
+<td>小特小特</td>
+</tr>
+<tr>
+<td><code>wn9_xiao3jia1xiao3jia1_tts3</code></td>
+<td>小珈小珈</td>
+</tr>
+<tr>
+<td><code>wn9_xiao3feng1xiao3feng1_tts3</code></td>
+<td>小峰小峰</td>
+</tr>
+<tr>
+<td><code>wn9_miaomiaotongxue_tts</code></td>
+<td>喵喵同学</td>
+</tr>
+<tr>
+<td><code>wn9_xiaomeitongxue_tts</code></td>
+<td>小美同学</td>
+</tr>
+<tr>
+<td><code>wn9_xiaoyutongxue_tts2</code></td>
+<td>小宇同学</td>
+</tr>
+<tr>
+<td><code>wn9_xiaomingtongxue_tts2</code></td>
+<td>小明同学</td>
+</tr>
+<tr>
+<td><code>wn9_xiaokangtongxue_tts2</code></td>
+<td>小康同学</td>
+</tr>
+<tr>
+<td><code>wn9_xiaoaitongxue</code></td>
+<td>小爱同学（真人录音版）</td>
+</tr>
+<tr>
+<td><code>wn9_himiaomiao_tts</code></td>
+<td>Hi,喵喵</td>
+</tr>
+<tr>
+<td><code>wn9_hilili_tts</code></td>
+<td>Hi,Lily / Hi,莉莉</td>
+</tr>
+<tr>
+<td><code>wn9_hitelly_tts</code></td>
+<td>Hi,Telly / Hi,泰力</td>
+</tr>
+<tr>
+<td><code>wn9_haixiaowu_tts</code></td>
+<td>Hi,小巫</td>
+</tr>
+<tr>
+<td><code>wn9_hai1xiao3ou1_tts3</code></td>
+<td>嗨小欧</td>
+</tr>
+<tr>
+<td><code>wn9_hai1xiao3xiang4_tts3</code></td>
+<td>嗨小象</td>
+</tr>
+<tr>
+<td><code>wn9_nihaoxiaoyi_tts2</code></td>
+<td>你好小益</td>
+</tr>
+<tr>
+<td><code>wn9_nihaobaiying_tts2</code></td>
+<td>你好百应</td>
+</tr>
+<tr>
+<td><code>wn9_nihaodongdong_tts2</code></td>
+<td>你好东东</td>
+</tr>
+<tr>
+<td><code>wn9_nihaoxiaoan_tts2</code></td>
+<td>你好小安</td>
+</tr>
+<tr>
+<td><code>wn9_ni3hao3xiao3mai4_tts2</code></td>
+<td>你好小脉</td>
+</tr>
+<tr>
+<td><code>wn9_ni3hao3xiao3rui4_tts3</code></td>
+<td>你好小瑞</td>
+</tr>
+<tr>
+<td><code>wn9l_ni3hao3xing1bao3_tts3</code></td>
+<td>你好星宝</td>
+</tr>
+<tr>
+<td><code>wn9_linaiban_tts2</code></td>
+<td>璃奈板</td>
+</tr>
+<tr>
+<td><code>wn9_xiaosurou_tts2</code></td>
+<td>小酥肉</td>
+</tr>
+<tr>
+<td><code>wn9_hiwalle_tts2</code></td>
+<td>Hi Wall E / Hi 瓦力</td>
+</tr>
+<tr>
+<td><code>wn9_hilexin</code></td>
+<td>Hi,乐鑫</td>
+</tr>
+<tr>
+<td><code>wn10s_hilexin</code> / <code>wn10_hilexin_int16</code></td>
+<td>Hi,乐鑫（wn10 版）</td>
+</tr>
+<tr>
+<td><code>wn10_nihaoxiaozhi</code> / <code>wn10_nihaoxiaozhi_int16</code></td>
+<td>你好小智（wn10 版，更准）</td>
+</tr>
+<tr>
+<td><code>wn10_xiaoaittongxue</code> / <code>wn10_xiaoaittongxue_int16</code></td>
+<td>小爱同学（wn10 版）</td>
+</tr>
+<tr>
+<td><code>wn10_tu2tu2ni3hao3</code></td>
+<td>涂涂你好</td>
+</tr>
+<tr>
+<td><code>wn10_shuang1er2</code></td>
+<td>双儿</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>带 <code>_tts</code> / <code>_tts2</code> / <code>_tts3</code> 后缀的是<strong>用合成语音训练</strong>的模型；
+没有后缀的（如 <code>wn9_xiaoaitongxue</code>）是<strong>真人录音</strong>训练的，通常误唤醒更低、对真人更稳。</p>
+</blockquote>
+<p>英文/其他 41 个（<code>wn9_hiesp</code>、<code>wn9_alexa</code>、<code>wn9_jarvis_tts</code>、<code>wn10_heyhermes</code>、<code>wn9_himyfive</code> 等）此处略。</p>
+<hr />
+<h2 id="3">3. 针对"心心"的建议</h2>
+<p><strong>没有"心心"这个模型，但 <code>wn9_nihaoxiaoxin_tts</code>（你好小鑫）发音最接近</strong>
+（nǐ hǎo xiǎo xīn vs nǐ hǎo xīn xīn）。</p>
+<p>两条路，按代价排序：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>做法</th>
+<th>延迟</th>
+<th>孩子要不要改口</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A. 保留 MultiNet"你好心心"</strong></td>
+<td>不动，只把 4 个候选砍成 1 个</td>
+<td>慢（400~900ms）</td>
+<td>不用</td>
+</tr>
+<tr>
+<td><strong>B. 换 WakeNet"你好小鑫"</strong></td>
+<td><code>--wake-word wn9_nihaoxiaoxin_tts</code></td>
+<td><strong>快（150~250ms）</strong></td>
+<td>要改成"你好小鑫"，或赌"你好心心"也能触发</td>
+</tr>
+<tr>
+<td>C. 换叠词词（小鹿小鹿 / 小龙小龙）</td>
+<td>同上，改模型 ID</td>
+<td>快</td>
+<td>要改口，但叠词对幼儿更顺口</td>
+</tr>
+</tbody>
+</table>
+<p><strong>建议先试 B</strong>：编一版试 10 分钟——如果孩子喊"你好心心"也能触发，那就是白赚 400ms；不能触发再退回 A。</p>
+<hr />
+<h2 id="4">4. 怎么切换</h2>
+<pre><code class="language-bash"># 1) 看你本地支持哪些（以这个为准）
+python scripts/build.py --list-wake-words
+
+# 2) 指定唤醒词编译
+python scripts/build.py --board espressif/esp-vocat \
+       --wake-word wn9_nihaoxiaoxin_tts
+
+# 3) 刷 app + assets（不刷整片，保住 WiFi 凭据）
+py -3.13 -m esptool --chip esp32s3 -p COM3 -b 460800 write-flash \
+   0x20000 build/xiaozhi.bin 0x800000 build/configured_assets.bin
+</code></pre>
+<blockquote>
+<p>⚠️ 你的板级 <code>config.json</code> 里现在写死了 <code>CONFIG_USE_CUSTOM_WAKE_WORD=y</code> 等一堆项
+（就是那个 <code>esp-vocat-xinxin</code> 档）。要用 WakeNet，<strong>新开一档</strong>别改原档：
+把 <code>CONFIG_USE_CUSTOM_WAKE_WORD=n</code>、<code>CONFIG_USE_AFE_WAKE_WORD=y</code>，
+唤醒词模型由 <code>--wake-word</code> 决定（不要再写 <code>CONFIG_CUSTOM_WAKE_WORD</code>）。</p>
+</blockquote>
+</div></body></html>
