@@ -39,10 +39,10 @@ F:\英语学习资料\POWER UP\POWER UP 1级 资料\1级别音频\学生用书�
 | 类型 | 报幕 | 后面是什么 | 切点 |
 |---|---|---|---|
 | Story | 4 短块 | **BGM 歌曲 ~17~38 秒** → 故事 | 歌曲结束处（26~42 秒） |
-| Vocab | 4 短块 | 指令（Listen and do the actions…）→ **歌曲正文** | 报幕结束（7~10 秒），歌曲保留 |
-| Literature | 4 短块（含 Pages xx and yy） | 标题 → 故事（**无 BGM**） | 报幕+标题后（8~12 秒） |
+| Song（原 Vocab 轨） | 4 短块 | 指令（Listen and do the actions…）→ **"Here's our song for today."** → 歌曲 | 切到 `Here's our song for today.`（19~21 秒），之前的指令不要 |
+| Literature | 4 短块（含 Pages xx and yy） | 标题 → 故事（**无 BGM**） | 报幕之后、**保留标题**（6~9 秒） |
 
-> 一句话：**只有 Story 的 BGM 是前奏，Vocab 的 BGM 就是正文（要跟唱的那首歌）**。
+> 一句话：**Story 的 BGM 是前奏要删；Song 的 BGM 就是正文要保留；Literature 的标题要留着。**
 
 ---
 
@@ -57,7 +57,7 @@ P1-04-U01-Literature.mp3
 … 共 28 个
 ```
 
-规格：单声道 / 22050Hz / 64kbps MP3，合计 **67.8 分钟，31.1 MB**（原 28 条共约 82 分钟）。
+规格：单声道 / 22050Hz / 64kbps MP3，合计 **66.3 分钟，30.4 MB**（原 28 条共约 82 分钟）。
 
 ---
 
@@ -74,16 +74,16 @@ docker exec xiaozhi-esp32-server python /tmp/asr_blocks_all.py /opt/xiaozhi-esp3
     > G:/xiaozhi-server/data/blocks_asr.txt
 
 # ③ 定位切点并生成
-python tools/powerup/trim_powerup2.py --dry   # 先看切点
-python tools/powerup/trim_powerup2.py         # 真生成
+python tools/powerup/trim_powerup.py --dry   # 先看切点
+python tools/powerup/trim_powerup.py         # 真生成
 ```
 
-### 判定逻辑（`trim_powerup2.py`）
+### 判定逻辑（`trim_powerup.py`）
 
 1. 在前 8 个块里找**最后一个报幕块**（正则 `pupil's book|unit N|page N|track N`）
-2. 跳过其后 1 个短块（≤4 词，通常是标题 `The first day.` 或序号 `1.`）
-3. 若类型是 `Story` 且后面还有带 `<|BGM|>` 标签的块 → 切在**最后一段 BGM 之后的第一个内容块**
-4. 否则切在第 2 步定位处
+2. `Story`：跳过 1 个短标题块，再跳过带 `<|BGM|>` 的块 → 切在 BGM 之后第一个内容块
+3. `Song`：找到含 `Here's our song / our song for today` 的块 → 切在这一句（之前的指令不要）
+4. `Literature`：切在报幕之后，**不跳标题块**（保留标题）
 
 ---
 
@@ -102,3 +102,26 @@ python tools/powerup/trim_powerup2.py         # 真生成
 
 - [ ] 接入设备熟听模式：`review_play` 目前写死 `SmartReading3` + 16 单元，需要支持"多书库 + 任意条数"
 - [ ] 若确认 `Vocabulary2-1` 不是你要的"歌曲"，改 `KINDS` 里的匹配串为 `sing the song` 重跑
+
+---
+
+## 7. ID3 标签（乱码问题）
+
+源 mp3 的 ID3 是 **GBK 编码**（`未知唱仩集` / `曲目 14`），ffmpeg 复用时原样复制字节，
+播放器按 Latin-1 读 → 一屏乱码。
+
+剪裁时统一处理：
+
+```bash
+ffmpeg -ss <cut> -i in.mp3   -map_metadata -1 \                                  # 丢掉源标签
+  -metadata title="P1 U03 Song"   -metadata artist="POWER UP 1"   -metadata album="POWER UP 1 熟听剪辑"   -metadata track=3   -id3v2_version 3 \                                  # 3 = 兼容性最好
+  -ac 1 -ar 22050 -c:a libmp3lame -b:a 64k out.mp3
+```
+
+验证：
+
+```bash
+ffprobe -v error -show_format "P1-04-U01-Literature.mp3" | grep TAG
+# TAG:title=P1 U01 Literature
+# TAG:artist=POWER UP 1
+```
