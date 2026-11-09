@@ -79,8 +79,15 @@ def main():
             if hit is None:
                 hit = next((b for b in info if SONG_ALT.search(b["text"])), None)
             if hit is not None:
-                cut = max(0.0, hit["start"] - 0.2)
-                why += f"；切到「{hit['text'][:28]}」@{hit['start']:.1f}s"
+                idx = info.index(hit)
+                nxt = info[idx + 1] if idx + 1 < len(info) else None
+                if nxt is not None:
+                    cut = max(0.0, nxt["start"] - 0.2)
+                    why += (f"；去掉「{hit['text'][:22]}」，从 {nxt['start']:.1f}s"
+                            f"「{nxt['text'][:16]}」开始")
+                else:
+                    cut = max(0.0, hit["end"] + 0.3)
+                    why += f"；「{hit['text'][:22]}」后无内容块"
             else:
                 if (base < len(info) and info[base]["text"]
                         and len(info[base]["text"].split()) <= 4

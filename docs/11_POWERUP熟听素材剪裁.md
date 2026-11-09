@@ -39,7 +39,7 @@ F:\英语学习资料\POWER UP\POWER UP 1级 资料\1级别音频\学生用书�
 | 类型 | 报幕 | 后面是什么 | 切点 |
 |---|---|---|---|
 | Story | 4 短块 | **BGM 歌曲 ~17~38 秒** → 故事 | 歌曲结束处（26~42 秒） |
-| Song（原 Vocab 轨） | 4 短块 | 指令（Listen and do the actions…）→ **"Here's our song for today."** → 歌曲 | 切到 `Here's our song for today.`（19~21 秒），之前的指令不要 |
+| Song（原 Vocab 轨） | 4 短块 | 指令 → **"Here's our song for today."** → 歌名 → 歌曲 | 切到歌名（23~26 秒）：指令和 `Here's our song for today.` 都不要 |
 | Literature | 4 短块（含 Pages xx and yy） | 标题 → 故事（**无 BGM**） | 报幕之后、**保留标题**（6~9 秒） |
 
 > 一句话：**Story 的 BGM 是前奏要删；Song 的 BGM 就是正文要保留；Literature 的标题要留着。**
@@ -57,7 +57,7 @@ P1-04-U01-Literature.mp3
 … 共 28 个
 ```
 
-规格：单声道 / 22050Hz / 64kbps MP3，合计 **66.3 分钟，30.4 MB**（原 28 条共约 82 分钟）。
+规格：单声道 / 22050Hz / 64kbps MP3，合计 **65.8 分钟，30.1 MB**（原 28 条共约 82 分钟）。
 
 ---
 
@@ -82,7 +82,7 @@ python tools/powerup/trim_powerup.py         # 真生成
 
 1. 在前 8 个块里找**最后一个报幕块**（正则 `pupil's book|unit N|page N|track N`）
 2. `Story`：跳过 1 个短标题块，再跳过带 `<|BGM|>` 的块 → 切在 BGM 之后第一个内容块
-3. `Song`：找到含 `Here's our song / our song for today` 的块 → 切在这一句（之前的指令不要）
+3. `Song`：找到含 `Here's our song / our song for today` 的块 → 切在**它的下一块**（歌名/第一句），指令和这句提示都不要
 4. `Literature`：切在报幕之后，**不跳标题块**（保留标题）
 
 ---
