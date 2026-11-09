@@ -304,4 +304,112 @@ py -3.13 -m esptool --chip esp32s3 -p COM3 -b 460800 write-flash \
 把 <code>CONFIG_USE_CUSTOM_WAKE_WORD=n</code>、<code>CONFIG_USE_AFE_WAKE_WORD=y</code>，
 唤醒词模型由 <code>--wake-word</code> 决定（不要再写 <code>CONFIG_CUSTOM_WAKE_WORD</code>）。</p>
 </blockquote>
+<hr />
+<h2 id="5-wakenet">5. 为什么 WakeNet 的唤醒词是固定的，不能自己加</h2>
+<h3 id="51-wakenet">5.1 WakeNet 不是"识别器"，是"二分类器"</h3>
+<p>WakeNet 的输入是一小段音频（约 1 秒），输出只有一个数：<strong>"这段话是不是那个特定词"的概率</strong>。</p>
+<p>它<strong>不认字、没有词典、没有音素、没有语言模型</strong>。模型权重里编码的，就是训练时那一个词的声学模式。</p>
+<blockquote>
+<p>打个比方：它不是"听写老师"，是"只认一张脸的猫"——换一张脸它就说不认识。</p>
+</blockquote>
+<p>所以"模型"和"唤醒词"是<strong>焊死在一起的</strong>：你换不了词，就像换不了那张脸。</p>
+<h3 id="52">5.2 训练一个词要什么</h3>
+<table>
+<thead>
+<tr>
+<th>需要</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数据</td>
+<td>那个词的真人录音，通常上万条：多说话人、多口音、多距离、多噪声</td>
+</tr>
+<tr>
+<td>流程</td>
+<td>数据增强 → 训练 → 蒸馏/剪枝 → int8 量化到 100~200KB</td>
+</tr>
+<tr>
+<td>工具链</td>
+<td>乐鑫内部流水线，<strong>不对外发布</strong>（只发训练好的 <code>.bin</code>）</td>
+</tr>
+</tbody>
+</table>
+<p>所以"多一个唤醒词"不是加一行配置，而是<strong>再训一个模型</strong>。个人拿不到数据和工具链。</p>
+<h3 id="53">5.3 架构上其实支持一个模型带多个词</h3>
+<p>代码里有 <code>wakenet_iface_-&gt;get_word_num()</code> / <code>get_word_name(i)</code>（<code>esp_wake_word.cc:120-125</code>），
+官方也确实发布过多词模型，例如 <code>wn9_hilili_tts</code> = <strong>"Hi,Lily / Hi,莉莉"</strong> 两个词一个模型。</p>
+<p><strong>结论：能力上能做到，但"你的词"只能在乐鑫训练时写进去，客户端没法追加。</strong></p>
+<h3 id="54-multinet">5.4 MultiNet 为什么就能随便加</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>WakeNet</th>
+<th>MultiNet</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>干什么</td>
+<td>判断"是不是这个词"</td>
+<td><strong>音素解码 + 文本匹配</strong></td>
+</tr>
+<tr>
+<td>加词方式</td>
+<td>重新训练模型</td>
+<td><code>esp_mn_commands_add("ni hao xin xin")</code>，运行时生效</td>
+</tr>
+<tr>
+<td>为什么</td>
+<td>模型里只有那个词的模板</td>
+<td>模型输出音素序列，文本→音素是现算的</td>
+</tr>
+<tr>
+<td>代价</td>
+<td>快（150~250ms）、省电</td>
+<td>慢（400~900ms）、连续解码更耗 CPU</td>
+</tr>
+</tbody>
+</table>
+<h3 id="55">5.5 想要"自己的词"，现实的三条路</h3>
+<table>
+<thead>
+<tr>
+<th>路</th>
+<th>可行性</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>① 近音词 + 调灵敏度</strong></td>
+<td>✅ <strong>推荐</strong></td>
+<td>用 <code>wn9_nihaoxiaoxin_tts</code>（你好小鑫），并把 <code>DET_MODE_95</code> 放宽到 <code>DET_MODE_90</code>，"你好心心"有机会触发</td>
+</tr>
+<tr>
+<td>② 换现成词</td>
+<td>✅ 简单</td>
+<td>小鹿小鹿 / 喵喵同学 / 你好喵伴，孩子改口</td>
+</tr>
+<tr>
+<td>③ 官方定制训练</td>
+<td>⚠️ 企业级</td>
+<td>乐鑫提供定制唤醒词服务，有起订量和费用，个人不划算</td>
+</tr>
+<tr>
+<td>④ 自己训</td>
+<td>❌ 不现实</td>
+<td>缺数据、缺工具链、还要做 esp-dl 量化</td>
+</tr>
+</tbody>
+</table>
+<p>灵敏度那一行在代码里（<code>main/audio/wake_words/esp_wake_word.cc:47</code>）：</p>
+<pre><code class="language-cpp">wakenet_data_ = wakenet_iface_-&gt;create(model_name, DET_MODE_95);
+// DET_MODE_90 更灵敏（更容易触发，误唤醒更多）
+// DET_MODE_95 默认
+// DET_MODE_99 更严格（误唤醒少，可能叫不应）
+</code></pre>
+<p><strong>这条是"代价换速度"的唯一旋钮</strong>：放宽一档，近音词更容易过；但同时电视里出现"小鑫"也可能唤醒。</p>
 </div></body></html>
