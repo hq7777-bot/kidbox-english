@@ -74,6 +74,10 @@ TTS:
     voice: zh-CN-XiaoyiNeural
 
 plugins:
+  # 天气：中国天气网（免 key）。IP 库常把海淀判成杭州，命中就回落默认地点
+  get_weather:
+    default_location: 北京海淀
+    ip_city_overrides: [杭州, 杭州市, 富阳, 杭州富阳, 浙江, 未知位置, ""]
   play_music:
     music_dir: /opt/xiaozhi-esp32-server/data/lessons
     refresh_time: 30
